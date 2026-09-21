@@ -1,1 +1,0 @@
-/Users/valkyrie/metro/metro-simulation-engine/target/debug/metro-bevy: /Users/valkyrie/metro/metro-simulation-engine/metro-bevy/src/main.rs /Users/valkyrie/metro/metro-simulation-engine/metro-core/src/lib.rs
