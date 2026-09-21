@@ -27,7 +27,7 @@ pub enum TrainState {
     Moving {
         from: StationId,
         to: StationId,
-        progress: f32,
+        elapsed_seconds: u64,
     },
 }
 
