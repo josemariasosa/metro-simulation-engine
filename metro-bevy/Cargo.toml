@@ -1,0 +1,7 @@
+[package]
+name = "metro-bevy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+metro-core = { path = "../metro-core" }
