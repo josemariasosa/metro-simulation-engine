@@ -1,5 +1,6 @@
 use crate::network::Network;
-use crate::train::{Train, TrainState};
+use crate::station::StationId;
+use crate::train::{AtStationState, Train, TrainState};
 
 #[derive(Debug)]
 pub struct Simulation {
@@ -17,49 +18,44 @@ impl Simulation {
         }
     }
 
-    pub fn step(&mut self) {
-        self.elapsed_seconds += 1;
-
-        for train in &mut self.trains {
-            match train.state {
-                TrainState::AtStation { station } => {
-                    match self.network.next_track(station, train.direction) {
+    fn step_at_station(
+        network: &Network,
+        train: &mut Train,
+        station: StationId,
+        state: AtStationState,
+    ) {
+        match state {
+            AtStationState::Dwelling {
+                elapsed_seconds,
+                dwell_seconds,
+            } => {
+                if elapsed_seconds + 1 < dwell_seconds {
+                    train.state = TrainState::AtStation {
+                        station,
+                        state: AtStationState::Dwelling {
+                            elapsed_seconds: elapsed_seconds + 1,
+                            dwell_seconds,
+                        },
+                    };
+                } else {
+                    match network.next_track(station, train.direction) {
                         Some(next_track) => {
                             train.state = TrainState::Moving {
                                 from: station,
                                 to: next_track.to,
-                                elapsed_seconds: 1,
+                                elapsed_seconds: 0,
                             };
                         }
                         None => {
-                            let next_track = self
-                                .network
+                            let next_track = network
                                 .next_track(station, train.direction.reverse())
                                 .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
                             train.state = TrainState::Moving {
                                 from: station,
                                 to: next_track.to,
-                                elapsed_seconds: 1,
+                                elapsed_seconds: 0,
                             };
                             train.direction = train.direction.reverse();
-                        }
-                    }
-                }
-
-                TrainState::Moving {
-                    from,
-                    to,
-                    elapsed_seconds,
-                } => {
-                    if let Some(track) = self.network.track(from, to) {
-                        if elapsed_seconds + 1 >= track.travel_seconds {
-                            train.state = TrainState::AtStation { station: to };
-                        } else {
-                            train.state = TrainState::Moving {
-                                from,
-                                to,
-                                elapsed_seconds: elapsed_seconds + 1,
-                            };
                         }
                     }
                 }
@@ -67,7 +63,52 @@ impl Simulation {
         }
     }
 
-    pub fn trains(&self) -> &Vec<Train> {
+    fn step_moving(
+        network: &Network,
+        train: &mut Train,
+        from: StationId,
+        to: StationId,
+        elapsed_seconds: u64,
+    ) {
+        let track = network.track(from, to).expect("TRACK_NOT_FOUND");
+        if elapsed_seconds + 1 >= track.travel_seconds {
+            train.state = TrainState::AtStation {
+                station: to,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3, // TODO: Fixed dwell value
+                },
+            };
+        } else {
+            train.state = TrainState::Moving {
+                from,
+                to,
+                elapsed_seconds: elapsed_seconds + 1,
+            };
+        }
+    }
+
+    pub fn step(&mut self) {
+        self.elapsed_seconds += 1;
+
+        for train in &mut self.trains {
+            match train.state {
+                TrainState::AtStation { station, state } => {
+                    Self::step_at_station(&self.network, train, station, state);
+                }
+
+                TrainState::Moving {
+                    from,
+                    to,
+                    elapsed_seconds,
+                } => {
+                    Self::step_moving(&self.network, train, from, to, elapsed_seconds);
+                }
+            }
+        }
+    }
+
+    pub fn trains(&self) -> &[Train] {
         &self.trains
     }
 }
@@ -93,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn step_starts_train_moving_toward_next_station() {
+    fn new_train_starts_dwelling_and_advances_dwell_time() {
         let mut network = Network::new();
 
         let station_a = network.add_station("A");
@@ -105,14 +146,175 @@ mod tests {
 
         let mut simulation = Simulation::new(network, vec![train]);
 
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: station_a,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3
+                }
+            }
+        );
+
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: station_a,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 1,
+                    dwell_seconds: 3
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn train_remains_dwelling_until_dwell_time_is_reached() {
+        let mut network = Network::new();
+
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+
+        network.connect_bidirectional(a, b, 10);
+
+        let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let mut simulation = Simulation::new(network, vec![train]);
+
+        simulation.step();
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: a,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 2,
+                    dwell_seconds: 3,
+                },
+            }
+        );
+
         simulation.step();
 
         assert_eq!(
             simulation.trains()[0].state,
             TrainState::Moving {
-                from: station_a,
-                to: station_b,
+                from: a,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn step_at_station_preserves_configured_dwell_duration() {
+        let mut network = Network::new();
+
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+
+        network.connect_bidirectional(a, b, 10);
+
+        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        train.state = TrainState::AtStation {
+            station: a,
+            state: AtStationState::Dwelling {
+                elapsed_seconds: 0,
+                dwell_seconds: 5,
+            },
+        };
+
+        let mut simulation = Simulation::new(network, vec![train]);
+
+        simulation.step();
+        simulation.step();
+        simulation.step();
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: a,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 4,
+                    dwell_seconds: 5,
+                },
+            }
+        );
+
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: a,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn moving_train_advances_from_zero_elapsed_seconds() {
+        let mut network = Network::new();
+
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+
+        network.connect_bidirectional(a, b, 3);
+
+        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        train.state = TrainState::Moving {
+            from: a,
+            to: b,
+            elapsed_seconds: 0,
+        };
+
+        let mut simulation = Simulation::new(network, vec![train]);
+
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: a,
+                to: b,
                 elapsed_seconds: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn train_arrives_after_one_second_on_one_second_track() {
+        let mut network = Network::new();
+
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+
+        network.connect_bidirectional(a, b, 1);
+
+        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        train.state = TrainState::Moving {
+            from: a,
+            to: b,
+            elapsed_seconds: 0,
+        };
+
+        let mut simulation = Simulation::new(network, vec![train]);
+
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: b,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
             }
         );
     }
@@ -129,6 +331,21 @@ mod tests {
         let train = Train::new(TrainId(0), 100, a, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train]);
 
+        // Dwell at A for 3 seconds.
+        simulation.step();
+        simulation.step();
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: a,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+
+        // Travel for 2 of the required 3 seconds.
         simulation.step();
         simulation.step();
 
@@ -154,13 +371,34 @@ mod tests {
         let train = Train::new(TrainId(0), 100, a, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train]);
 
+        // Dwell at A for 3 seconds.
         simulation.step();
         simulation.step();
         simulation.step();
 
         assert_eq!(
             simulation.trains()[0].state,
-            TrainState::AtStation { station: b }
+            TrainState::Moving {
+                from: a,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+
+        // Travel from A to B for 3 seconds.
+        simulation.step();
+        simulation.step();
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: b,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
+            }
         );
     }
 
@@ -178,8 +416,13 @@ mod tests {
         let train = Train::new(TrainId(0), 100, c, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train]);
 
+        // Dwell at C for 3 seconds.
+        simulation.step();
+        simulation.step();
         simulation.step();
 
+        // No track exists forward from C, so the train reverses
+        // and starts moving toward B.
         assert_eq!(simulation.trains()[0].direction, Direction::Backward);
 
         assert_eq!(
@@ -187,7 +430,7 @@ mod tests {
             TrainState::Moving {
                 from: c,
                 to: b,
-                elapsed_seconds: 1,
+                elapsed_seconds: 0,
             }
         );
     }
@@ -206,16 +449,40 @@ mod tests {
         let train = Train::new(TrainId(0), 100, c, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train]);
 
-        // C -> B
+        // Dwell at C, then reverse and depart toward B.
+        simulation.step();
+        simulation.step();
+        simulation.step();
+
+        assert_eq!(simulation.trains()[0].direction, Direction::Backward);
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: c,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+
+        // Travel C -> B.
         simulation.step();
         simulation.step();
 
         assert_eq!(
             simulation.trains()[0].state,
-            TrainState::AtStation { station: b }
+            TrainState::AtStation {
+                station: b,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
+            }
         );
 
-        // It should continue B -> A, still traveling backward.
+        // Dwell at B, then continue toward A.
+        simulation.step();
+        simulation.step();
         simulation.step();
 
         assert_eq!(simulation.trains()[0].direction, Direction::Backward);
@@ -225,7 +492,7 @@ mod tests {
             TrainState::Moving {
                 from: b,
                 to: a,
-                elapsed_seconds: 1,
+                elapsed_seconds: 0,
             }
         );
     }

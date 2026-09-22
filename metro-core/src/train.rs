@@ -22,12 +22,20 @@ impl Direction {
 pub enum TrainState {
     AtStation {
         station: StationId,
+        state: AtStationState,
     },
-
     Moving {
         from: StationId,
         to: StationId,
         elapsed_seconds: u64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AtStationState {
+    Dwelling {
+        elapsed_seconds: u64,
+        dwell_seconds: u64,
     },
 }
 
@@ -44,7 +52,13 @@ impl Train {
         Self {
             id,
             capacity,
-            state: TrainState::AtStation { station },
+            state: TrainState::AtStation {
+                station,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
+            },
             direction,
         }
     }
@@ -62,7 +76,16 @@ mod tests {
 
         let train = Train::new(TrainId(0), 100, station, Direction::Forward);
 
-        assert_eq!(train.state, TrainState::AtStation { station });
+        assert_eq!(
+            train.state,
+            TrainState::AtStation {
+                station,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3
+                }
+            }
+        );
     }
 
     #[test]
@@ -102,4 +125,49 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn new_train_starts_dwelling_at_station() {
+        let station = StationId(0);
+
+        let train = Train::new(TrainId(0), 100, station, Direction::Forward);
+
+        assert_eq!(
+            train.state,
+            TrainState::AtStation {
+                station,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
+            }
+        );
+    }
+
+    // #[test]
+    // fn step_advances_train_dwelling_time() {
+    //     let mut network = Network::new();
+
+    //     let a = network.add_station("A");
+    //     let b = network.add_station("B");
+
+    //     network.connect_bidirectional(a, b, 10);
+
+    //     let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+
+    //     let mut simulation = Simulation::new(network, vec![train]);
+
+    //     simulation.step();
+
+    //     assert_eq!(
+    //         simulation.trains()[0].state,
+    //         TrainState::AtStation {
+    //             station: a,
+    //             state: AtStationState::Dwelling {
+    //                 elapsed_seconds: 1,
+    //                 dwell_seconds: 3,
+    //             },
+    //         }
+    //     );
+    // }
 }
