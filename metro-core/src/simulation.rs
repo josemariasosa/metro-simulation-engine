@@ -23,24 +23,22 @@ impl Simulation {
         for train in &mut self.trains {
             match train.state {
                 TrainState::AtStation { station } => {
-                    match self.network.next_station(station, train.direction) {
-                        Some(next_station) => {
-                            assert!(self.network.travel_time(station, next_station).is_some());
+                    match self.network.next_track(station, train.direction) {
+                        Some(next_track) => {
                             train.state = TrainState::Moving {
                                 from: station,
-                                to: next_station,
+                                to: next_track.to,
                                 elapsed_seconds: 1,
                             };
                         }
                         None => {
-                            let next_station = self
+                            let next_track = self
                                 .network
-                                .next_station(station, train.direction.reverse())
-                                .expect("NO_NEXT_STATION_AFTER_REVERSING_DIRECTION");
-                            assert!(self.network.travel_time(station, next_station).is_some());
+                                .next_track(station, train.direction.reverse())
+                                .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
                             train.state = TrainState::Moving {
                                 from: station,
-                                to: next_station,
+                                to: next_track.to,
                                 elapsed_seconds: 1,
                             };
                             train.direction = train.direction.reverse();
@@ -53,8 +51,8 @@ impl Simulation {
                     to,
                     elapsed_seconds,
                 } => {
-                    if let Some(travel_time) = self.network.travel_time(from, to) {
-                        if elapsed_seconds + 1 >= travel_time {
+                    if let Some(track) = self.network.track(from, to) {
+                        if elapsed_seconds + 1 >= track.travel_seconds {
                             train.state = TrainState::AtStation { station: to };
                         } else {
                             train.state = TrainState::Moving {

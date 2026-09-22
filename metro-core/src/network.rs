@@ -38,9 +38,29 @@ impl Network {
         self.stations.len()
     }
 
-    pub fn next_station(&self, current: StationId, direction: Direction) -> Option<StationId> {
+    pub fn add_track(&mut self, from: StationId, to: StationId, travel_seconds: u64) {
+        let track = Track {
+            from,
+            to,
+            travel_seconds,
+        };
+        self.tracks.insert((from, to), track);
+    }
+
+    pub fn track(&self, from: StationId, to: StationId) -> Option<&Track> {
+        self.tracks.get(&(from, to))
+    }
+
+    pub fn connect_bidirectional(&mut self, from: StationId, to: StationId, travel_seconds: u64) {
+        self.add_track(from, to, travel_seconds);
+
+        // Bidirectional connection
+        self.add_track(to, from, travel_seconds);
+    }
+
+    pub fn next_track(&self, current: StationId, direction: Direction) -> Option<&Track> {
         let index = current.0;
-        match direction {
+        let next_station = match direction {
             Direction::Forward => {
                 if index + 1 < self.stations.len() {
                     Some(StationId(index + 1))
@@ -55,33 +75,9 @@ impl Network {
                     None
                 }
             }
-        }
-    }
-
-    pub fn add_track(&mut self, from: StationId, to: StationId, travel_seconds: u64) {
-        let track = Track {
-            from,
-            to,
-            travel_seconds,
         };
-        self.tracks.insert((from, to), track);
-    }
 
-    pub fn connect_bidirectional(&mut self, from: StationId, to: StationId, travel_seconds: u64) {
-        self.add_track(from, to, travel_seconds);
-
-        // Bidirectional connection
-        self.add_track(to, from, travel_seconds);
-    }
-
-    pub fn travel_time(&self, from: StationId, to: StationId) -> Option<u64> {
-        self.tracks
-            .get(&(from, to))
-            .map(|track| track.travel_seconds)
-    }
-
-    pub fn next_track(&self, current: StationId, direction: Direction) -> Option<&Track> {
-        if let Some(next_station) = self.next_station(current, direction) {
+        if let Some(next_station) = next_station {
             if let Some(track) = self.tracks.get(&(current, next_station)) {
                 return Some(track);
             }
@@ -107,25 +103,6 @@ mod tests {
     }
 
     #[test]
-    fn finds_next_station_in_both_directions() {
-        let mut network = Network::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-        let c = network.add_station("C");
-        let _ = network.add_station("D");
-        let e = network.add_station("E");
-
-        assert_eq!(network.next_station(b, Direction::Forward), Some(c));
-
-        assert_eq!(network.next_station(b, Direction::Backward), Some(a));
-
-        assert_eq!(network.next_station(e, Direction::Forward), None);
-
-        assert_eq!(network.next_station(a, Direction::Backward), None);
-    }
-
-    #[test]
     fn can_add_track() {
         let mut network = Network::new();
 
@@ -134,8 +111,14 @@ mod tests {
 
         network.add_track(a, b, 180);
 
-        assert_eq!(network.travel_time(a, b), Some(180));
-        assert_eq!(network.travel_time(b, a), None);
+        assert_eq!(
+            network
+                .next_track(a, Direction::Forward)
+                .unwrap()
+                .travel_seconds,
+            180
+        );
+        assert!(network.next_track(b, Direction::Backward).is_none());
     }
 
     #[test]
@@ -147,8 +130,20 @@ mod tests {
 
         network.connect_bidirectional(a, b, 180);
 
-        assert_eq!(network.travel_time(a, b), Some(180));
-        assert_eq!(network.travel_time(b, a), Some(180));
+        assert_eq!(
+            network
+                .next_track(a, Direction::Forward)
+                .unwrap()
+                .travel_seconds,
+            180
+        );
+        assert_eq!(
+            network
+                .next_track(b, Direction::Backward)
+                .unwrap()
+                .travel_seconds,
+            180
+        );
     }
 
     #[test]
@@ -157,11 +152,11 @@ mod tests {
 
         let a = network.add_station("A");
         let b = network.add_station("B");
-        let c = network.add_station("C");
+        let _c = network.add_station("C");
 
         network.connect_bidirectional(a, b, 180);
 
-        assert_eq!(network.travel_time(a, c), None);
+        assert!(network.next_track(b, Direction::Forward).is_none());
     }
 
     #[test]
@@ -212,5 +207,21 @@ mod tests {
         assert_eq!(track.from, station_b);
         assert_eq!(track.to, station_a);
         assert_eq!(track.travel_seconds, 60);
+    }
+
+    #[test]
+    fn track_returns_exact_connection() {
+        let mut network = Network::new();
+
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+
+        network.connect_bidirectional(a, b, 180);
+
+        let track = network.track(a, b).expect("expected track from A to B");
+
+        assert_eq!(track.from, a);
+        assert_eq!(track.to, b);
+        assert_eq!(track.travel_seconds, 180);
     }
 }
