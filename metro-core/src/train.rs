@@ -53,6 +53,8 @@ impl Train {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::Network;
+    use crate::simulation::Simulation;
 
     #[test]
     fn train_starts_at_station() {
@@ -68,5 +70,36 @@ mod tests {
         assert_eq!(Direction::Forward.reverse(), Direction::Backward);
 
         assert_eq!(Direction::Backward.reverse(), Direction::Forward);
+    }
+
+    #[test]
+    fn moving_train_advances_elapsed_time() {
+        let mut network = Network::new();
+
+        let station_a = network.add_station("A");
+        let station_b = network.add_station("B");
+
+        network.connect_bidirectional(station_a, station_b, 60);
+
+        let mut train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+
+        train.state = TrainState::Moving {
+            from: station_a,
+            to: station_b,
+            elapsed_seconds: 1,
+        };
+
+        let mut simulation = Simulation::new(network, vec![train]);
+
+        simulation.step();
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: station_a,
+                to: station_b,
+                elapsed_seconds: 2,
+            }
+        );
     }
 }

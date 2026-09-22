@@ -17,21 +17,53 @@ impl Simulation {
         }
     }
 
-    pub fn step(&mut self, dt: u64) {
-        self.elapsed_seconds += dt;
+    pub fn step(&mut self) {
+        self.elapsed_seconds += 1;
 
         for train in &mut self.trains {
-            if let TrainState::AtStation { station } = train.state {
-                let Some(next_station) = self.network.next_station(station, train.direction) else {
-                    continue;
-                };
+            match train.state {
+                TrainState::AtStation { station } => {
+                    match self.network.next_station(station, train.direction) {
+                        Some(next_station) => {
+                            assert!(self.network.travel_time(station, next_station).is_some());
+                            train.state = TrainState::Moving {
+                                from: station,
+                                to: next_station,
+                                elapsed_seconds: 1,
+                            };
+                        }
+                        None => {
+                            let next_station = self
+                                .network
+                                .next_station(station, train.direction.reverse())
+                                .expect("NO_NEXT_STATION_AFTER_REVERSING_DIRECTION");
+                            assert!(self.network.travel_time(station, next_station).is_some());
+                            train.state = TrainState::Moving {
+                                from: station,
+                                to: next_station,
+                                elapsed_seconds: 1,
+                            };
+                            train.direction = train.direction.reverse();
+                        }
+                    }
+                }
 
-                if self.network.travel_time(station, next_station).is_some() {
-                    train.state = TrainState::Moving {
-                        from: station,
-                        to: next_station,
-                        elapsed_seconds: dt,
-                    };
+                TrainState::Moving {
+                    from,
+                    to,
+                    elapsed_seconds,
+                } => {
+                    if let Some(travel_time) = self.network.travel_time(from, to) {
+                        if elapsed_seconds + 1 >= travel_time {
+                            train.state = TrainState::AtStation { station: to };
+                        } else {
+                            train.state = TrainState::Moving {
+                                from,
+                                to,
+                                elapsed_seconds: elapsed_seconds + 1,
+                            };
+                        }
+                    }
                 }
             }
         }
@@ -55,11 +87,11 @@ mod tests {
 
         let mut simulation = Simulation::new(network, trains);
 
-        simulation.step(4);
-        simulation.step(5);
-        simulation.step(6);
+        simulation.step();
+        simulation.step();
+        simulation.step();
 
-        assert_eq!(simulation.elapsed_seconds, 15);
+        assert_eq!(simulation.elapsed_seconds, 3);
     }
 
     #[test]
@@ -69,19 +101,46 @@ mod tests {
         let station_a = network.add_station("A");
         let station_b = network.add_station("B");
 
-        network.connect_stations(station_a, station_b, 60);
+        network.connect_bidirectional(station_a, station_b, 60);
 
         let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
 
         let mut simulation = Simulation::new(network, vec![train]);
 
-        simulation.step(1);
+        simulation.step();
 
         assert_eq!(
             simulation.trains()[0].state,
             TrainState::Moving {
                 from: station_a,
                 to: station_b,
+                elapsed_seconds: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn train_reverses_direction_at_end_of_line() {
+        let mut network = Network::new();
+
+        let station_a = network.add_station("A");
+        let station_b = network.add_station("B");
+
+        network.connect_bidirectional(station_a, station_b, 60);
+
+        let train = Train::new(TrainId(0), 100, station_b, Direction::Forward);
+
+        let mut simulation = Simulation::new(network, vec![train]);
+
+        simulation.step();
+
+        assert_eq!(simulation.trains()[0].direction, Direction::Backward);
+
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: station_b,
+                to: station_a,
                 elapsed_seconds: 1,
             }
         );

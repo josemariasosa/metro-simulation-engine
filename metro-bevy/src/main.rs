@@ -1,4 +1,4 @@
-use metro_core::station::Network;
+use metro_core::network::Network;
 
 fn main() {
     let mut network = Network::new();
