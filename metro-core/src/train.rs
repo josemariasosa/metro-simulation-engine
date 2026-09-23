@@ -39,7 +39,7 @@ pub enum AtStationState {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Train {
     pub id: TrainId,
     pub capacity: usize,
@@ -67,6 +67,7 @@ impl Train {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dwell::DwellPolicy;
     use crate::network::Network;
     use crate::simulation::Simulation;
 
@@ -98,6 +99,7 @@ mod tests {
     #[test]
     fn moving_train_advances_elapsed_time() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let station_a = network.add_station("A");
         let station_b = network.add_station("B");
@@ -112,7 +114,7 @@ mod tests {
             elapsed_seconds: 1,
         };
 
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         simulation.step();
 

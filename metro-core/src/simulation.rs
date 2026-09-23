@@ -1,3 +1,4 @@
+use crate::dwell::DwellPolicy;
 use crate::network::Network;
 use crate::station::StationId;
 use crate::train::{AtStationState, Train, TrainState};
@@ -7,14 +8,16 @@ pub struct Simulation {
     pub elapsed_seconds: u64,
     pub network: Network,
     trains: Vec<Train>,
+    dwell_policy: DwellPolicy,
 }
 
 impl Simulation {
-    pub fn new(network: Network, trains: Vec<Train>) -> Self {
+    pub fn new(network: Network, trains: Vec<Train>, dwell_policy: DwellPolicy) -> Self {
         Self {
             elapsed_seconds: 0,
             network,
             trains,
+            dwell_policy,
         }
     }
 
@@ -65,6 +68,7 @@ impl Simulation {
 
     fn step_moving(
         network: &Network,
+        dwell_policy: &DwellPolicy,
         train: &mut Train,
         from: StationId,
         to: StationId,
@@ -72,11 +76,12 @@ impl Simulation {
     ) {
         let track = network.track(from, to).expect("TRACK_NOT_FOUND");
         if elapsed_seconds + 1 >= track.travel_seconds {
+            let dwell_seconds = dwell_policy.dwell_seconds(to, train);
             train.state = TrainState::AtStation {
                 station: to,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3, // TODO: Fixed dwell value
+                    dwell_seconds,
                 },
             };
         } else {
@@ -102,7 +107,14 @@ impl Simulation {
                     to,
                     elapsed_seconds,
                 } => {
-                    Self::step_moving(&self.network, train, from, to, elapsed_seconds);
+                    Self::step_moving(
+                        &self.network,
+                        &self.dwell_policy,
+                        train,
+                        from,
+                        to,
+                        elapsed_seconds,
+                    );
                 }
             }
         }
@@ -115,16 +127,19 @@ impl Simulation {
 
 #[cfg(test)]
 mod tests {
-    use crate::train::{Direction, Train, TrainId, TrainState};
+    use crate::{
+        train::{Direction, Train, TrainId, TrainState},
+    };
 
     use super::*;
 
     #[test]
     fn simulation_advances_time() {
         let network = Network::new();
+        let dwell_policy = DwellPolicy::new();
         let trains = Vec::new();
 
-        let mut simulation = Simulation::new(network, trains);
+        let mut simulation = Simulation::new(network, trains, dwell_policy);
 
         simulation.step();
         simulation.step();
@@ -136,6 +151,7 @@ mod tests {
     #[test]
     fn new_train_starts_dwelling_and_advances_dwell_time() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let station_a = network.add_station("A");
         let station_b = network.add_station("B");
@@ -144,7 +160,7 @@ mod tests {
 
         let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
 
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train.clone()], dwell_policy.clone());
 
         assert_eq!(
             simulation.trains()[0].state,
@@ -152,7 +168,7 @@ mod tests {
                 station: station_a,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3
+                    dwell_seconds: dwell_policy.dwell_seconds(station_a, &train),
                 }
             }
         );
@@ -165,7 +181,7 @@ mod tests {
                 station: station_a,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 1,
-                    dwell_seconds: 3
+                    dwell_seconds: dwell_policy.dwell_seconds(station_a, &train),
                 }
             }
         );
@@ -174,14 +190,15 @@ mod tests {
     #[test]
     fn train_remains_dwelling_until_dwell_time_is_reached() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
-        let a = network.add_station("A");
-        let b = network.add_station("B");
+        let station_a = network.add_station("A");
+        let station_b = network.add_station("B");
 
-        network.connect_bidirectional(a, b, 10);
+        network.connect_bidirectional(station_a, station_b, 10);
 
-        let train = Train::new(TrainId(0), 100, a, Direction::Forward);
-        let mut simulation = Simulation::new(network, vec![train]);
+        let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        let mut simulation = Simulation::new(network, vec![train.clone()], dwell_policy.clone());
 
         simulation.step();
         simulation.step();
@@ -189,10 +206,10 @@ mod tests {
         assert_eq!(
             simulation.trains()[0].state,
             TrainState::AtStation {
-                station: a,
+                station: station_a,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 2,
-                    dwell_seconds: 3,
+                    dwell_seconds: dwell_policy.dwell_seconds(station_a, &train),
                 },
             }
         );
@@ -202,8 +219,8 @@ mod tests {
         assert_eq!(
             simulation.trains()[0].state,
             TrainState::Moving {
-                from: a,
-                to: b,
+                from: station_a,
+                to: station_b,
                 elapsed_seconds: 0,
             }
         );
@@ -212,6 +229,7 @@ mod tests {
     #[test]
     fn step_at_station_preserves_configured_dwell_duration() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -227,7 +245,7 @@ mod tests {
             },
         };
 
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         simulation.step();
         simulation.step();
@@ -260,6 +278,7 @@ mod tests {
     #[test]
     fn moving_train_advances_from_zero_elapsed_seconds() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -273,7 +292,7 @@ mod tests {
             elapsed_seconds: 0,
         };
 
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         simulation.step();
 
@@ -290,6 +309,7 @@ mod tests {
     #[test]
     fn train_arrives_after_one_second_on_one_second_track() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -302,8 +322,9 @@ mod tests {
             to: b,
             elapsed_seconds: 0,
         };
+        let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
 
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         simulation.step();
 
@@ -313,7 +334,7 @@ mod tests {
                 station: b,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3,
+                    dwell_seconds: expected_dwell_seconds,
                 },
             }
         );
@@ -322,6 +343,7 @@ mod tests {
     #[test]
     fn train_remains_moving_until_track_travel_time_is_reached() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -329,7 +351,7 @@ mod tests {
         network.connect_bidirectional(a, b, 3);
 
         let train = Train::new(TrainId(0), 100, a, Direction::Forward);
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at A for 3 seconds.
         simulation.step();
@@ -362,6 +384,7 @@ mod tests {
     #[test]
     fn train_arrives_when_track_travel_time_is_reached() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -369,7 +392,8 @@ mod tests {
         network.connect_bidirectional(a, b, 3);
 
         let train = Train::new(TrainId(0), 100, a, Direction::Forward);
-        let mut simulation = Simulation::new(network, vec![train]);
+        let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at A for 3 seconds.
         simulation.step();
@@ -396,7 +420,7 @@ mod tests {
                 station: b,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3,
+                    dwell_seconds: expected_dwell_seconds,
                 },
             }
         );
@@ -405,6 +429,7 @@ mod tests {
     #[test]
     fn train_reverses_direction_at_end_of_line() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -414,7 +439,7 @@ mod tests {
         network.connect_bidirectional(b, c, 10);
 
         let train = Train::new(TrainId(0), 100, c, Direction::Forward);
-        let mut simulation = Simulation::new(network, vec![train]);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at C for 3 seconds.
         simulation.step();
@@ -438,6 +463,7 @@ mod tests {
     #[test]
     fn train_continues_in_reversed_direction_after_reaching_endpoint() {
         let mut network = Network::new();
+        let dwell_policy = DwellPolicy::new();
 
         let a = network.add_station("A");
         let b = network.add_station("B");
@@ -447,7 +473,8 @@ mod tests {
         network.connect_bidirectional(b, c, 2);
 
         let train = Train::new(TrainId(0), 100, c, Direction::Forward);
-        let mut simulation = Simulation::new(network, vec![train]);
+        let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at C, then reverse and depart toward B.
         simulation.step();
@@ -475,7 +502,7 @@ mod tests {
                 station: b,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3,
+                    dwell_seconds: expected_dwell_seconds,
                 },
             }
         );
