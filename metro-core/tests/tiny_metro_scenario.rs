@@ -190,6 +190,10 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
     }
 
     // assert that both trains have reached the opposite ends
+    assert_eq!(simulation.elapsed_seconds, 732);
+    for train in simulation.snapshot().trains {
+        assert_eq!(train.velocity, 0);
+    }
     assert_eq!(
         simulation.trains()[0].state,
         TrainState::AtStation {
@@ -211,11 +215,20 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         }
     );
 
-    for _ in 0..3 {
+    for elapsed_seconds in 733..735 {
         simulation.step();
+        assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
+        for train in simulation.snapshot().trains {
+            assert_eq!(train.velocity, 0);
+        }
     }
+    simulation.step();
 
     // assert that both trains have reversed and started heading back
+    assert_eq!(simulation.elapsed_seconds, 735);
+    for train in simulation.snapshot().trains {
+        assert_eq!(train.velocity, 1);
+    }
     assert_eq!(
         simulation.trains()[0].state,
         TrainState::Moving {
@@ -236,6 +249,10 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
     simulation.step();
 
     // assert that both trains are effectively moving back toward the origin
+    assert_eq!(simulation.elapsed_seconds, 736);
+    for train in simulation.snapshot().trains {
+        assert_eq!(train.velocity, 1);
+    }
     assert_eq!(
         simulation.trains()[0].state,
         TrainState::Moving {

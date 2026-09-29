@@ -128,6 +128,7 @@ impl Simulation {
                                 elapsed_seconds: 0,
                             };
                             train.direction = train.direction.reverse();
+                            train.velocity = 1;
                         }
                     }
                 }
@@ -607,13 +608,16 @@ mod tests {
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at C for 3 seconds.
+        assert_eq!(simulation.trains()[0].velocity, 0);
         simulation.step();
         simulation.step();
+        assert_eq!(simulation.trains()[0].velocity, 0);
         simulation.step();
 
         // No track exists forward from C, so the train reverses
         // and starts moving toward B.
         assert_eq!(simulation.trains()[0].direction, Direction::Backward);
+        assert_eq!(simulation.trains()[0].velocity, 1);
 
         assert_eq!(
             simulation.trains()[0].state,
