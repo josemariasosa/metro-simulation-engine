@@ -6,9 +6,12 @@
 
 SPEC-001 establishes a small, owned observation contract between `metro-core` and its consumers. It preserves the existing one-second simulation step and makes train state observable without exposing internal model objects as the consumer contract.
 
-This document specifies future implementation. Its creation does not authorize implementation. The educational plan below requires a review checkpoint after every step.
+This document specifies future implementation; this revision does not implement the API. It distinguishes two delivery scopes:
 
-MUST and MUST NOT denote requirements; SHOULD denotes a recommendation; MAY denotes an optional choice. Requirements apply to the completed feature unless explicitly identified as a follow-up or optional presentation work.
+- **MVP Observation Boundary:** the independently deliverable core milestone defined in section 6.1. It unlocks work toward a mini-game based on `metro-core`.
+- **Full SPEC-001 contract / future direction:** the architectural decisions, broader verification, core-driven Bevy vertical slice, and educational roadmap retained below. Completing this direction is not a prerequisite for accepting the MVP or continuing game development.
+
+MUST and MUST NOT denote requirements; SHOULD denotes a recommendation; MAY denotes an optional choice. For the MVP, section 6.1 controls implementation scope and Definition of Done. Requirements elsewhere preserve the full contract and applicable semantics, but MUST NOT expand the MVP's tests, hardening, or integration deliverables. Deferred verification does not permit observation side effects or a second source of railway authority.
 
 ## 2. Motivation
 
@@ -36,9 +39,27 @@ metro-core -- step() --> simulation truth -- snapshot() --> SimulationSnapshot
 - The boundary MUST use domain IDs and integer simulation durations, not rendering types.
 - The contract SHOULD contain only facts needed by the current slice. It MUST NOT become a model dump, event log, or analytics framework.
 
+The immediate architecture is:
+
+```text
+metro-core -> step() -> authoritative simulation state
+                                  |
+                              snapshot()
+                                  |
+                          SimulationSnapshot -> metro-bevy
+```
+
+The future game/control direction is:
+
+```text
+player input -> command / intent -> metro-core -> snapshot -> metro-bevy
+```
+
+Manual control will submit intent to core; the renderer MUST NOT directly mutate railway state. Commands and control states are later work, not prerequisites for the current observation boundary.
+
 ## 4. Current State
 
-This section describes the inspected implementation, not additional requirements or planned features.
+This section describes the inspected implementation, not additional requirements or planned features. `SimulationSnapshot` and `Simulation::snapshot()` are not implemented yet.
 
 ### Simulation
 
@@ -98,7 +119,85 @@ The Bevy application MAY own a `Simulation` in a resource and invoke `step()`. R
 
 ## 6. Observation Contract
 
-### Conceptual public API
+### 6.1 MVP Observation Boundary
+
+> Implement the smallest owned, read-only observation boundary that allows a consumer to determine the current logical train state without reading or mutating metro-core internals.
+
+This milestone can be implemented and accepted independently of the rest of SPEC-001. Core remains authoritative for simulation time, dwell, movement, arrival, reversal, direction, and track traversal time.
+
+#### MVP — IN SCOPE
+
+Only the following deliverables are required:
+
+1. **Snapshot DTOs:** add `SimulationSnapshot`, `TrainSnapshot`, and `TrainSnapshotState` with exactly the public data semantics shown in section 6.2. Minor idiomatic Rust adjustments are acceptable. Reuse `TrainId`, `StationId`, and `Direction`; no rendering types enter core.
+2. **`Simulation::snapshot()`:** expose `pub fn snapshot(&self) -> SimulationSnapshot`. It MUST return owned data, with no references to `Simulation`, `Train`, `TrainState`, `Track`, or `Network`. It MUST NOT execute `step()`, modify any timer or other state, decide new transitions, execute policies, or consume RNG. It MUST preserve the current train vector order.
+3. **Current states only:** map `AtStation::Dwelling` (currently represented by `TrainState::AtStation` with `AtStationState::Dwelling`) and `Moving`. Do not introduce `Ready`, `Blocked`, `WaitingForCommand`, or other future states.
+4. **Enough data for rendering:** dwelling exposes station, remaining dwell seconds, and direction; moving exposes `from`, `to`, elapsed traversal seconds, total traversal seconds, and direction. A consumer can derive `progress = elapsed_seconds / travel_seconds` as a non-truncating ratio and project between its own station coordinates, without reading internal trains or tracks. Section 7 defines these semantics; building a renderer is not required.
+5. **Focused tests only:** demonstrate the cases in the MVP Definition of Done below. Not every invariant or full-contract acceptance criterion needs its own test in this milestone.
+
+#### MVP — OUT OF SCOPE
+
+**Observation hardening and additional infrastructure:**
+
+- Exhaustive sparse-vs-frequent observation replay suites.
+- Testing every possible frame/update partition.
+- Exhaustive train insertion-order corner cases.
+- Exhaustive invalid-state handling and structured snapshot errors.
+- Topology mutation handling and constructor validation.
+- Zero-duration track rejection and duplicate `TrainId` validation.
+- Making `Simulation` fields private.
+- Dwell-policy initialization cleanup.
+- RNG or seed support.
+- Serialization and replay infrastructure.
+- Events, metrics, and analytics APIs.
+
+Valid current runs remain the supported scope, under section 13's assumptions. These exclusions defer hardening and exhaustive proof, not the owned, read-only semantics or preservation of train order.
+
+**Future game/control states:**
+
+- `AtStationState::Ready`.
+- `TrainControl` and automatic/manual ownership.
+- `TrainCommand`, `RequestDeparture`, and command reports.
+- Blocked states and departure authorization.
+- Route-selection commands.
+- Stopping mid-segment.
+- Throttle, braking, and acceleration.
+
+These concepts will probably extend the snapshot later. They MUST NOT block the current MVP, and this milestone introduces no speculative variants or command API.
+
+**Railway safety:**
+
+- Collision detection and segment occupancy.
+- `BlockId` and station berths.
+- Reservations, signaling, and arbitration.
+- Deadlock prevention and following-distance models.
+- Physical geometry collision.
+
+**Bevy migration:** integration is optional/stretch. At most, this milestone may check that Bevy can receive or print a snapshot. Implementing `SimulationSnapshot` MUST NOT depend on completing the Bevy migration. The MVP Definition of Done excludes:
+
+- Removing Bevy's toy movement.
+- Robust real-time pacing and catch-up logic.
+- Synthetic frame partition tests.
+- Sprite orientation and bounce.
+
+The migration decisions in sections 10–11 remain the direction for a later core-driven renderer. Existing duplicate prototype behavior is not the target architecture, but removing it is a separate milestone.
+
+#### MVP Definition of Done
+
+The MVP is complete when the DTOs and full `snapshot(&self)` method support both current states with the semantics above, and focused tests demonstrate:
+
+- An initial snapshot of a dwelling train.
+- Correct dwell countdown in a normal scenario.
+- Departure as moving with `elapsed_seconds = 0`.
+- An intermediate snapshot during movement.
+- Arrival as dwelling at the destination station.
+- Two consecutive `snapshot()` calls without `step()` produce equal snapshots.
+- Retaining an old snapshot and then advancing the simulation leaves that snapshot unchanged.
+- All existing `metro-core` tests continue passing, including the unchanged five-station integration scenario.
+
+Use `cargo test -p metro-core` to verify this milestone. Review the method for owned output, side-effect-free mapping, correct value sources, and preserved vector order. No exhaustive invariant suite, full round-trip demo, Bevy change, command system, or hardening work is an additional acceptance gate. Once this Definition of Done passes, game development can continue using the observation boundary.
+
+### 6.2 Conceptual public API
 
 The following is illustrative Rust. Minor module placement or Rust-level adjustments MAY be made during reviewed implementation without changing these semantics. A small `metro_core::snapshot` module is the proposed location for DTOs.
 
@@ -226,7 +325,9 @@ Snapshots answer “What is true now?” They cannot alone report historical arr
 
 No consumer can mutate simulation truth through snapshots.
 
-## 10. First Vertical Slice
+## 10. First Vertical Slice (Post-MVP)
+
+This is the retained full core-driven demo target, not the MVP Definition of Done. Its A–B setup may be reused for focused MVP tests without requiring the entire timeline.
 
 The first demo MUST build a separate A <-> B network using existing construction APIs, with one train initially at A facing `Forward`. Use six seconds in each direction for the example and the current three-second core dwell. Capacity can retain the existing conventional value of 100; it has no effect here.
 
@@ -256,7 +357,9 @@ At departure the state changes before visual position changes: progress zero is 
 
 The existing five-station/two-train integration scenario MUST remain unchanged and pass alongside the new fixture.
 
-## 11. Migration of metro-bevy
+## 11. Migration of metro-bevy (Post-MVP)
+
+This migration is a separate follow-up. None of its deletion, pacing, orientation, or animation work blocks the core MVP.
 
 Once direct projection is connected, the following prototype logic MUST be deleted:
 
@@ -315,9 +418,11 @@ The first implementation MUST support valid states produced by the current engin
 
 IDs are stable within a run, not a persistence format. Owned snapshot allocation is acceptable for the first boundary; performance work SHOULD follow measured need. Snapshot sampling is optional, so a batch run need not pay this cost every tick.
 
-## 14. Acceptance Criteria
+## 14. Full-Contract Acceptance Criteria (Beyond MVP)
 
-The core contract is accepted when:
+These criteria retain the broader SPEC-001 direction. They are not cumulative MVP gates; section 6.1 alone defines MVP acceptance. Additional cases such as configured dwell, one-second tracks, reversal, unsorted IDs, and cross-run observation-frequency comparisons may be verified later.
+
+The full core contract is accepted when:
 
 1. DTOs contain only owned domain values, IDs, and integer times; no Bevy or rendering types appear in the core API.
 2. `snapshot()` observes through `&self`, does not change exposed core time/train state, and repeated calls without steps compare equal.
@@ -341,7 +446,11 @@ Optional smoothing is accepted separately and MUST preserve all core determinism
 
 ## Educational Implementation Plan
 
-This plan is not an instruction to begin implementation. After spec review, work proceeds one numbered step at a time. At every checkpoint: inspect the change, run the relevant tests, discuss the result, commit only that checkpoint, and STOP. Do not automatically continue into the next step.
+This plan is not an instruction to begin implementation. The detailed ten-step roadmap below is retained as an **optional educational path for the full contract**, not a required sequence or additional Definition of Done for the MVP.
+
+The default MVP implementation path is to add the DTOs, implement the complete read-only method for both current states, and add only the focused tests from section 6.1. It may be delivered as one core-only PR; private intermediate helpers, DTO construction tests, extra edge-case tests, and the full observation-independence suite below are not required checkpoints. Do not expose a partially implemented public method.
+
+If the educational path is explicitly chosen, work proceeds one numbered step at a time. At every checkpoint: inspect the change, run the relevant tests, discuss the result, commit only that checkpoint, and STOP. Do not automatically continue into the next step. These checkpoints apply to that chosen learning workflow, not to MVP scope.
 
 The first four checkpoints deliberately separate DTO definition from observation mechanics. To avoid shipping a public `snapshot()` that panics on a normal moving train, early dwelling conversion can be exercised through a private helper in `simulation.rs`; the complete public method arrives in Step 4. No `todo!()` branch or fabricated moving observation is an acceptable checkpoint.
 
@@ -527,16 +636,20 @@ The first four checkpoints deliberately separate DTO definition from observation
 
 ## PR / Commit Strategy
 
+**MVP delivery:** one independent core-only PR containing the section 6.1 DTOs, complete `snapshot()` method, and focused tests. Bevy integration is optional/stretch and is not needed to merge or accept this PR. Further game work need not wait for the full roadmap.
+
+**Retained full-contract / educational grouping:**
+
 | PR | Educational commits | Scope |
 | --- | --- | --- |
 | PR1 — Core observation contract | Steps 1–5 | DTOs, complete observation, and deterministic semantics; no Bevy changes or broad hardening |
 | PR2 — Core-driven Bevy vertical slice | Steps 6–9 | Separate A–B fixture, pacing, direct projection, deletion of toy behavior, and derived presentation |
 | PR3 — Optional presentation smoothing | Step 10 | Presentation-only smoothing after the direct boundary is accepted |
 
-PR grouping MUST NOT collapse the educational checkpoints. Each step is reviewed and committed before beginning the next. No implementation begins as part of writing this specification.
+When the optional educational path is chosen, PR grouping MUST NOT collapse its checkpoints: each step is reviewed and committed before beginning the next. This does not constrain the independent MVP delivery above. No implementation begins as part of writing this specification.
 
 ## Decisions Before Implementation
 
-No unresolved technical decision blocks Step 1. This proposal selects the DTO fields, existing ID/direction types, insertion-order output, a `snapshot` module, and a six-second demo track. Spec review precedes implementation.
+No unresolved technical decision blocks the MVP or educational Step 1. This proposal selects the DTO fields, existing ID/direction types, insertion-order output, a `snapshot` module, and a six-second demo track. Spec review precedes implementation.
 
 Comprehensive validation, private simulation fields, initialization/policy unification, future events/metrics, and optional smoothing are separate decisions. They MUST NOT be used to expand or delay the DTO checkpoint.
