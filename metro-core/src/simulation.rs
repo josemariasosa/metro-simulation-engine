@@ -148,6 +148,40 @@ mod tests {
 
     use super::*;
 
+    /// A fresh bidirectional line for each test. Station IDs follow the supplied order.
+    struct SimulationFixture<const N: usize> {
+        network: Network,
+        stations: [StationId; N],
+        dwell_policy: DwellPolicy,
+    }
+
+    impl<const N: usize> SimulationFixture<N> {
+        fn new(station_names: [&str; N], travel_seconds: u64) -> Self {
+            let mut network = Network::new();
+            let stations = station_names.map(|name| network.add_station(name));
+            for pair in stations.windows(2) {
+                network.connect_bidirectional(pair[0], pair[1], travel_seconds);
+            }
+
+            Self {
+                network,
+                stations,
+                dwell_policy: DwellPolicy::new(),
+            }
+        }
+    }
+
+    /// Default scenario: one train dwelling at A, with a ten-second track to B.
+    fn test_simulation() -> Simulation {
+        let SimulationFixture {
+            network,
+            stations: [a, _],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 10);
+        let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        Simulation::new(network, vec![train], dwell_policy)
+    }
+
     #[test]
     fn simulation_advances_time() {
         let network = Network::new();
@@ -165,13 +199,11 @@ mod tests {
 
     #[test]
     fn new_train_starts_dwelling_and_advances_dwell_time() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let station_a = network.add_station("A");
-        let station_b = network.add_station("B");
-
-        network.connect_bidirectional(station_a, station_b, 60);
+        let SimulationFixture {
+            network,
+            stations: [station_a, _],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 60);
 
         let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
 
@@ -204,13 +236,11 @@ mod tests {
 
     #[test]
     fn train_remains_dwelling_until_dwell_time_is_reached() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let station_a = network.add_station("A");
-        let station_b = network.add_station("B");
-
-        network.connect_bidirectional(station_a, station_b, 10);
+        let SimulationFixture {
+            network,
+            stations: [station_a, station_b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 10);
 
         let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train.clone()], dwell_policy.clone());
@@ -243,13 +273,11 @@ mod tests {
 
     #[test]
     fn step_at_station_preserves_configured_dwell_duration() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-
-        network.connect_bidirectional(a, b, 10);
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 10);
 
         let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
         train.state = TrainState::AtStation {
@@ -292,13 +320,11 @@ mod tests {
 
     #[test]
     fn moving_train_advances_from_zero_elapsed_seconds() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-
-        network.connect_bidirectional(a, b, 3);
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 3);
 
         let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
         train.state = TrainState::Moving {
@@ -323,13 +349,11 @@ mod tests {
 
     #[test]
     fn train_arrives_after_one_second_on_one_second_track() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-
-        network.connect_bidirectional(a, b, 1);
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 1);
 
         let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
         train.state = TrainState::Moving {
@@ -357,13 +381,11 @@ mod tests {
 
     #[test]
     fn train_remains_moving_until_track_travel_time_is_reached() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-
-        network.connect_bidirectional(a, b, 3);
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 3);
 
         let train = Train::new(TrainId(0), 100, a, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
@@ -398,13 +420,11 @@ mod tests {
 
     #[test]
     fn train_arrives_when_track_travel_time_is_reached() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-
-        network.connect_bidirectional(a, b, 3);
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 3);
 
         let train = Train::new(TrainId(0), 100, a, Direction::Forward);
         let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
@@ -443,15 +463,11 @@ mod tests {
 
     #[test]
     fn train_reverses_direction_at_end_of_line() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-        let c = network.add_station("C");
-
-        network.connect_bidirectional(a, b, 10);
-        network.connect_bidirectional(b, c, 10);
+        let SimulationFixture {
+            network,
+            stations: [_, b, c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 10);
 
         let train = Train::new(TrainId(0), 100, c, Direction::Forward);
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
@@ -477,15 +493,11 @@ mod tests {
 
     #[test]
     fn train_continues_in_reversed_direction_after_reaching_endpoint() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let a = network.add_station("A");
-        let b = network.add_station("B");
-        let c = network.add_station("C");
-
-        network.connect_bidirectional(a, b, 2);
-        network.connect_bidirectional(b, c, 2);
+        let SimulationFixture {
+            network,
+            stations: [a, b, c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
 
         let train = Train::new(TrainId(0), 100, c, Direction::Forward);
         let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
@@ -541,7 +553,8 @@ mod tests {
 
     #[test]
     fn initial_dwelling_state_maps_to_snapshot_state() {
-        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
+        let simulation = test_simulation();
+        let train = &simulation.trains()[0];
 
         let TrainState::AtStation {
             station,
@@ -559,6 +572,99 @@ mod tests {
 
         assert_eq!(
             snapshot_state,
+            TrainSnapshotState::Dwelling {
+                station: StationId(0),
+                remaining_seconds: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn dwelling_snapshot_countdown_matches_future_steps_until_departure() {
+        let mut simulation = test_simulation();
+
+        let train = &simulation.trains()[0];
+
+        let TrainState::AtStation {
+            station,
+            state:
+                AtStationState::Dwelling {
+                    elapsed_seconds,
+                    dwell_seconds,
+                },
+        } = train.state
+        else {
+            panic!("expected train to start dwelling");
+        };
+
+        assert_eq!(
+            dwelling_snapshot_state(station, elapsed_seconds, dwell_seconds,),
+            TrainSnapshotState::Dwelling {
+                station,
+                remaining_seconds: 3,
+            }
+        );
+
+        simulation.step();
+
+        let train = &simulation.trains()[0];
+        let TrainState::AtStation {
+            station,
+            state:
+                AtStationState::Dwelling {
+                    elapsed_seconds,
+                    dwell_seconds,
+                },
+        } = train.state
+        else {
+            panic!("expected train to still be dwelling");
+        };
+
+        assert_eq!(
+            dwelling_snapshot_state(station, elapsed_seconds, dwell_seconds,),
+            TrainSnapshotState::Dwelling {
+                station,
+                remaining_seconds: 2,
+            }
+        );
+
+        simulation.step();
+
+        let train = &simulation.trains()[0];
+        let TrainState::AtStation {
+            station,
+            state:
+                AtStationState::Dwelling {
+                    elapsed_seconds,
+                    dwell_seconds,
+                },
+        } = train.state
+        else {
+            panic!("expected train to still be dwelling");
+        };
+
+        assert_eq!(
+            dwelling_snapshot_state(station, elapsed_seconds, dwell_seconds,),
+            TrainSnapshotState::Dwelling {
+                station,
+                remaining_seconds: 1,
+            }
+        );
+
+        simulation.step();
+
+        assert!(matches!(
+            simulation.trains()[0].state,
+            TrainState::Moving { .. }
+        ));
+    }
+
+    #[test]
+    fn dwelling_snapshot_uses_stored_dwell_duration() {
+        let snapshot = dwelling_snapshot_state(StationId(0), 2, 5);
+
+        assert_eq!(
+            snapshot,
             TrainSnapshotState::Dwelling {
                 station: StationId(0),
                 remaining_seconds: 3,
