@@ -12,6 +12,7 @@ pub struct TrainSnapshot {
     pub id: TrainId,
     pub direction: Direction,
     pub state: TrainSnapshotState,
+    pub velocity: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,7 @@ mod tests {
             trains: vec![TrainSnapshot {
                 id: TrainId(1),
                 direction: Direction::Forward,
+                velocity: 0,
                 state: TrainSnapshotState::Dwelling {
                     station: StationId(0),
                     remaining_seconds: 3,
@@ -58,6 +60,7 @@ mod tests {
         let dwelling = TrainSnapshot {
             id: TrainId(1),
             direction: Direction::Forward,
+            velocity: 0,
             state: TrainSnapshotState::Dwelling {
                 station: StationId(0),
                 remaining_seconds: 3,
@@ -67,6 +70,7 @@ mod tests {
         let moving = TrainSnapshot {
             id: TrainId(2),
             direction: Direction::Backward,
+            velocity: 1,
             state: TrainSnapshotState::Moving {
                 from: StationId(1),
                 to: StationId(0),

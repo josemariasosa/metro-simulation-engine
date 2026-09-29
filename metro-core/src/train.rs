@@ -18,6 +18,12 @@ impl Direction {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrainControl {
+    Automatic,
+    Manual,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TrainState {
     AtStation {
@@ -45,6 +51,8 @@ pub struct Train {
     pub capacity: usize,
     pub state: TrainState,
     pub direction: Direction,
+    pub(crate) control: TrainControl,
+    pub(crate) velocity: u8,
 }
 
 impl Train {
@@ -60,6 +68,8 @@ impl Train {
                 },
             },
             direction,
+            control: TrainControl::Automatic,
+            velocity: 0,
         }
     }
 }
@@ -113,6 +123,7 @@ mod tests {
             to: station_b,
             elapsed_seconds: 1,
         };
+        train.velocity = 1;
 
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
@@ -146,30 +157,17 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn step_advances_train_dwelling_time() {
-    //     let mut network = Network::new();
+    #[test]
+    fn new_train_is_automatic() {
+        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
 
-    //     let a = network.add_station("A");
-    //     let b = network.add_station("B");
+        assert_eq!(train.control, TrainControl::Automatic);
+    }
 
-    //     network.connect_bidirectional(a, b, 10);
+    #[test]
+    fn new_train_starts_stopped() {
+        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
 
-    //     let train = Train::new(TrainId(0), 100, a, Direction::Forward);
-
-    //     let mut simulation = Simulation::new(network, vec![train]);
-
-    //     simulation.step();
-
-    //     assert_eq!(
-    //         simulation.trains()[0].state,
-    //         TrainState::AtStation {
-    //             station: a,
-    //             state: AtStationState::Dwelling {
-    //                 elapsed_seconds: 1,
-    //                 dwell_seconds: 3,
-    //             },
-    //         }
-    //     );
-    // }
+        assert_eq!(train.velocity, 0);
+    }
 }

@@ -14,13 +14,18 @@ fn test_simulation(travel_seconds: u64) -> Simulation {
     Simulation::new(network, vec![train], DwellPolicy::new())
 }
 
-fn expected_snapshot(elapsed_seconds: u64, state: TrainSnapshotState) -> SimulationSnapshot {
+fn expected_snapshot(
+    elapsed_seconds: u64,
+    velocity: u8,
+    state: TrainSnapshotState,
+) -> SimulationSnapshot {
     SimulationSnapshot {
         elapsed_seconds,
         trains: vec![TrainSnapshot {
             id: TrainId(0),
             direction: Direction::Forward,
             state,
+            velocity,
         }],
     }
 }
@@ -77,10 +82,7 @@ fn observation_frequency_does_not_affect_simulation_result() {
         sparsely_observed.step();
     }
 
-    assert_eq!(
-        frequently_observed.snapshot(),
-        sparsely_observed.snapshot()
-    );
+    assert_eq!(frequently_observed.snapshot(), sparsely_observed.snapshot());
 }
 
 #[test]
@@ -105,6 +107,7 @@ fn snapshot_reports_initial_dwelling_state() {
         simulation.snapshot(),
         expected_snapshot(
             0,
+            0,
             TrainSnapshotState::Dwelling {
                 station: StationId(0),
                 remaining_seconds: 3,
@@ -124,6 +127,7 @@ fn snapshot_reports_departure_with_zero_elapsed_time() {
         simulation.snapshot(),
         expected_snapshot(
             3,
+            1,
             TrainSnapshotState::Moving {
                 from: StationId(0),
                 to: StationId(1),
@@ -145,6 +149,7 @@ fn snapshot_reports_intermediate_movement() {
         simulation.snapshot(),
         expected_snapshot(
             5,
+            1,
             TrainSnapshotState::Moving {
                 from: StationId(0),
                 to: StationId(1),
@@ -166,6 +171,7 @@ fn snapshot_reports_arrival_as_dwelling() {
         simulation.snapshot(),
         expected_snapshot(
             9,
+            0,
             TrainSnapshotState::Dwelling {
                 station: StationId(1),
                 remaining_seconds: 3,
@@ -185,6 +191,7 @@ fn snapshot_reports_departure_and_arrival_on_one_second_track() {
         simulation.snapshot(),
         expected_snapshot(
             3,
+            1,
             TrainSnapshotState::Moving {
                 from: StationId(0),
                 to: StationId(1),
@@ -200,6 +207,7 @@ fn snapshot_reports_departure_and_arrival_on_one_second_track() {
         simulation.snapshot(),
         expected_snapshot(
             4,
+            0,
             TrainSnapshotState::Dwelling {
                 station: StationId(1),
                 remaining_seconds: 3,
@@ -232,6 +240,7 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
                 TrainSnapshot {
                     id: TrainId(9),
                     direction: Direction::Backward,
+                    velocity: 1,
                     state: TrainSnapshotState::Moving {
                         from: b,
                         to: a,
@@ -242,6 +251,7 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
                 TrainSnapshot {
                     id: TrainId(2),
                     direction: Direction::Forward,
+                    velocity: 1,
                     state: TrainSnapshotState::Moving {
                         from: a,
                         to: b,
@@ -252,4 +262,20 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
             ],
         }
     );
+}
+
+#[test]
+fn snapshot_copies_train_velocity() {
+    let mut simulation = test_simulation(6);
+
+    let initial_snapshot = simulation.snapshot();
+    assert_eq!(initial_snapshot.trains[0].velocity, 0);
+
+    for _ in 0..3 {
+        simulation.step();
+    }
+
+    let departure_snapshot = simulation.snapshot();
+    assert_eq!(departure_snapshot.trains[0].velocity, 1);
+    assert_eq!(initial_snapshot.trains[0].velocity, 0);
 }

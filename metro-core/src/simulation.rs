@@ -54,6 +54,7 @@ impl Simulation {
         TrainSnapshot {
             id: train.id,
             direction: train.direction,
+            velocity: train.velocity,
             state: self.snapshot_train_state(&train.state),
         }
     }
@@ -115,6 +116,7 @@ impl Simulation {
                                 to: next_track.to,
                                 elapsed_seconds: 0,
                             };
+                            train.velocity = 1;
                         }
                         None => {
                             let next_track = network
@@ -151,6 +153,7 @@ impl Simulation {
                     dwell_seconds,
                 },
             };
+            train.velocity = 0;
         } else {
             train.state = TrainState::Moving {
                 from,
@@ -322,6 +325,53 @@ mod tests {
     }
 
     #[test]
+    fn automatic_train_starts_moving_with_velocity_one() {
+        let SimulationFixture {
+            network,
+            stations: [station_a, station_b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 60);
+
+        let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        assert_eq!(train.control, crate::train::TrainControl::Automatic);
+
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
+
+        // The train stays stopped through the first two seconds of dwell.
+        for elapsed_seconds in 0..3 {
+            let train = &simulation.trains()[0];
+            assert_eq!(
+                (train.state, train.velocity),
+                (
+                    TrainState::AtStation {
+                        station: station_a,
+                        state: AtStationState::Dwelling {
+                            elapsed_seconds,
+                            dwell_seconds: 3,
+                        },
+                    },
+                    0,
+                )
+            );
+            simulation.step();
+        }
+
+        // Departure sets velocity before any track traversal time is consumed.
+        let train = &simulation.trains()[0];
+        assert_eq!(
+            (train.state, train.velocity),
+            (
+                TrainState::Moving {
+                    from: station_a,
+                    to: station_b,
+                    elapsed_seconds: 0,
+                },
+                1,
+            )
+        );
+    }
+
+    #[test]
     fn step_at_station_preserves_configured_dwell_duration() {
         let SimulationFixture {
             network,
@@ -369,6 +419,37 @@ mod tests {
     }
 
     #[test]
+    fn moving_train_keeps_velocity_one_during_traversal() {
+        let SimulationFixture {
+            network,
+            stations: [station_a, station_b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 60);
+
+        let mut train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        train.state = TrainState::Moving {
+            from: station_a,
+            to: station_b,
+            elapsed_seconds: 1,
+        };
+        train.velocity = 1;
+
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
+
+        simulation.step();
+
+        assert_eq!(simulation.trains()[0].velocity, 1);
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: station_a,
+                to: station_b,
+                elapsed_seconds: 2,
+            }
+        );
+    }
+
+    #[test]
     fn moving_train_advances_from_zero_elapsed_seconds() {
         let SimulationFixture {
             network,
@@ -382,6 +463,7 @@ mod tests {
             to: b,
             elapsed_seconds: 0,
         };
+        train.velocity = 1;
 
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
@@ -398,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn train_arrives_after_one_second_on_one_second_track() {
+    fn arriving_train_stops_and_starts_fresh_dwell() {
         let SimulationFixture {
             network,
             stations: [a, b],
@@ -411,19 +493,21 @@ mod tests {
             to: b,
             elapsed_seconds: 0,
         };
-        let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
+        train.velocity = 1;
 
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         simulation.step();
 
+        let train = &simulation.trains()[0];
+        assert_eq!(train.velocity, 0);
         assert_eq!(
-            simulation.trains()[0].state,
+            train.state,
             TrainState::AtStation {
                 station: b,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: expected_dwell_seconds,
+                    dwell_seconds: 3,
                 },
             }
         );
