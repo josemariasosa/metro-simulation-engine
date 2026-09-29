@@ -18,7 +18,12 @@ The player operates the train through actions; `metro-core` decides and commits
 legal world-state transitions. The previous `RequestDeparture` abstraction sounded
 like administrative permission and encoded a high-level transition: “please
 transition this train from station state to Moving.” Replace it with the concrete
-player action `Accelerate`: apply the player's intent to begin movement now.
+player action `Accelerate`: “Apply the player's intent for this train to be moving.”
+This expresses intent rather than a request for a particular state transition.
+If a manual train is already Moving, that intent is already satisfied: return
+`Ok(())` as an exact no-op. Adapters need not suppress repeated input to avoid an
+error. This decision fits the binary-velocity MVP; future multi-level throttle or
+physical acceleration semantics may revisit it.
 
 For this MVP, acceleration is deliberately binary: velocity 0 means stopped and
 velocity 1 means moving. Existing timed track traversal remains authoritative;
@@ -140,6 +145,8 @@ Legacy public APIs remain; full visibility enforcement is separate hardening.
 - Exactly one player command: `Accelerate { train_id: TrainId }`, synchronous and atomic.
 - Acceleration from Dwelling or Ready, including immediately at time zero.
 - Acceleration during unfinished dwell abandons that dwell interval.
+- Accelerate while a manual train is already Moving is an idempotent `Ok(())`
+  with no mutation; repeated input does not increase velocity beyond 1.
 - Without input, a manual train finishes normal dwell and waits in Ready.
 - Core-selected outgoing track, direction, endpoint reversal, traversal timing,
   and arrival station under existing routing rules.
@@ -175,10 +182,14 @@ Focused tests MUST demonstrate:
 4. Arrival sets velocity 1 → 0 and starts fresh normal dwell at elapsed zero.
    Abandoned dwell does not carry over; repeated manual operation works.
 5. Core chooses tracks and reverses direction when movement begins as required.
-6. All four rejection reasons are covered, including no outgoing track from both
-   station states and duplicate acceleration while Moving; rejection changes no state.
-7. Accepted commands change only the addressed train and advance neither simulation
-   time nor traversal time; the next step consumes the first traversal second.
+6. All three rejection reasons (`UnknownTrain`, `NotManual`, `NoOutgoingTrack`)
+   are covered, including no outgoing track from both station states; rejection
+   changes no state. Duplicate Accelerate while Moving returns `Ok(())` as an
+   idempotent exact no-op, proven by before/after state comparison, including
+   simulation time, traversal elapsed time, direction, velocity, and unrelated trains.
+7. Accepted commands may change only the addressed train and advance neither simulation
+   time nor traversal time. Departure starts traversal at elapsed zero; the next step
+   consumes the first traversal second. Commands while Moving preserve existing elapsed time.
 8. Snapshots distinguish Dwelling, Ready, and Moving, expose consistent velocity,
    and remain owned and pure, including across commands at unchanged timestamps.
 9. Equal ordered steps/commands produce equal results despite different observation
@@ -205,7 +216,6 @@ pub enum TrainCommand {
 pub enum CommandError {
     UnknownTrain,
     NotManual,
-    AlreadyMoving,
     NoOutgoingTrack,
 }
 ```
@@ -216,24 +226,36 @@ Application entry point:
 pub fn apply_command(&mut self, command: TrainCommand) -> Result<(), CommandError>;
 ```
 
-`Accelerate` means “apply the player's intent to begin movement now”: a stopped
-manual train at a station begins traversal toward the core-selected next station.
+`Accelerate` means “Apply the player's intent for this train to be moving.” A stopped
+manual train at a station begins traversal toward the core-selected next station;
+an already Moving manual train satisfies that intent without any mutation.
 It carries only `train_id`, never source or destination station, direction,
 selected track, coordinates, target velocity, or traversal time.
-`Ok(())` means the transition to Moving and velocity 1 was committed before return,
-not queued. Observe committed state through `snapshot()`.
+`Ok(())` means the intent is satisfied before return: either departure to Moving
+at velocity 1 was committed or the train was already Moving and unchanged. Nothing
+is queued. Observe committed state through `snapshot()`.
 There is no `StillDwelling` error or separate success payload. Expose only
 `apply_command()` as the command application entry point.
 
-The four errors describe acceleration validation: `UnknownTrain` for an unknown
-ID, `NotManual` for an automatic train, `AlreadyMoving` for a traversing train,
+The three errors describe acceleration validation: `UnknownTrain` for an unknown
+ID, `NotManual` for an automatic train (including one already Moving),
 and `NoOutgoingTrack` when neither routing direction works. These names remain
 appropriate; no departure-permission terminology is needed.
 
-Validation order is: locate ID → require Manual → require either station state
-with velocity 0 → choose current-direction track or reverse fallback → commit Moving and velocity 1.
-Failures return the corresponding error above. Locate by ID equality, not vector
-index; a linear search is sufficient. No valid candidate means `NoOutgoingTrack`.
+Validation order is:
+
+1. Locate the train by ID equality, not vector index; a linear search is sufficient.
+   If absent, return `UnknownTrain`.
+2. Require Manual; otherwise return `NotManual`.
+3. If already Moving, return `Ok(())` immediately as an exact no-op, without
+   station validation or track selection. Preserve simulation time, traversal
+   elapsed time, direction, velocity, train state, and all unrelated trains.
+4. Otherwise require either stopped station state (Dwelling or Ready) with
+   velocity 0, as guaranteed by the supported-state invariant in section 8.
+5. Select the current-direction track or reverse fallback. If neither exists,
+   return `NoOutgoingTrack`.
+6. Commit the selected direction and `Moving { elapsed_seconds: 0, ... }`
+   together with velocity 1, then return `Ok(())`.
 
 All validation precedes mutation. Rejection leaves train state, velocity, direction,
 timers, global simulation time, and unrelated trains unchanged. A failed reverse
@@ -277,6 +299,7 @@ Dwelling, velocity=0 ── Accelerate ──→ Moving, velocity=1
                                                       │
                                                       └── Accelerate ──→ Moving, velocity=1
 Moving, velocity=1 ── traversal completes ──→ Dwelling at next station, velocity=0
+Moving, velocity=1 ── Accelerate / Ok(()) ──→ exact same Moving state and timers
 
 Automatic:
 Dwelling, velocity=0 ── dwell completes ──→ Moving, velocity=1
@@ -304,18 +327,19 @@ not define route order. Existing reverse fallback also applies at interior gaps.
 ## 9. Command Timing Semantics
 
 Calls are serial: commands run between complete one-second steps, never inside one.
-They advance neither global time nor traversal time. Successful Accelerate sets
-velocity to 1 and starts Moving at elapsed zero; the next step consumes the first
-traversal second.
+They advance neither global time nor traversal time. Accelerate from a stopped
+station state sets velocity to 1 and starts Moving at elapsed zero; the next step
+consumes the first traversal second. Accelerate while already Moving returns
+`Ok(())` without resetting elapsed time or changing any state.
 
-| Situation | Result for a manual train with a valid outgoing track |
+| Situation | Result for a manual train (station departure requires a valid outgoing track) |
 | --- | --- |
 | Accelerate at initial time zero | Moving immediately, velocity 1 |
 | Accelerate before dwell-completion step | Moving, velocity 1; next step advances traversal |
 | Dwell completes with no preceding command | Ready, velocity 0 |
 | Accelerate after dwell-completion step | Moving at that same time, velocity 1 |
 | No command while Ready | Remains stopped at station, velocity 0 |
-| Accelerate while Moving, including duplicate command | `AlreadyMoving`; no change |
+| Accelerate while Moving, including duplicate command | `Ok(())`; exact no-op, no state or time change |
 | Accelerate immediately after arrival | Moving from fresh Dwelling, velocity 1 |
 
 No command is remembered or retried automatically. For a one-second track, the
@@ -338,6 +362,7 @@ Observation must never repair or mutate inconsistent domain state.
 
 Adapters may offer Accelerate input in BOTH station states for the configured
 manual train. They must not disable it merely because remaining dwell is positive.
+Repeated input while Moving is safe to submit: it succeeds without mutation.
 Ready does not promise a usable track or future safety clearance.
 No `can_accelerate`, predicted destination, or control-mode snapshot field is needed.
 
@@ -368,6 +393,7 @@ commands and snapshots after trusted setup.
 | 1 | Step; Dwelling at A, 2 remaining | 0 |
 | 1 | Accelerate succeeds early; Moving A → B, elapsed 0 | 1 |
 | 2 | Step; Moving A → B, elapsed 1 | 1 |
+| 2 | Duplicate Accelerate returns `Ok(())`; exact same state, direction, and elapsed 1 | 1 |
 | 3 | Step; arrives B, fresh Dwelling, 3 remaining, still Forward | 0 |
 | 6 | Three steps without input; Ready at B, still Forward | 0 |
 | 7 | Another step; still Ready at B, unchanged | 0 |
@@ -377,7 +403,8 @@ commands and snapshots after trusted setup.
 | 9 | Accelerate succeeds immediately; core reverses to Forward, Moving A → B, elapsed 0 | 1 |
 
 This proves early acceleration, deliberate waiting, a complete round trip,
-automatic stopping, fresh dwell, and repeated player actions without graphics.
+automatic stopping, fresh dwell, and idempotent repeated input while Moving
+without graphics.
 
 ## 13. Future Physical Constraints / SPEC-003 Boundary
 
@@ -467,23 +494,32 @@ defer regressions. All paths below are relative to `metro-core/`.
 - **Goal:** Establish the concrete command contract.
 - **Tests first:** Small construction/equality test for command and error values.
 - **Likely files:** New `src/command.rs`, `src/lib.rs`.
-- **Smallest production change:** Export the single command and four errors.
+- **Smallest production change:** Export the single command and three errors.
 - **Expected behavior:** No simulation behavior changes and no domain DTO dependency.
 - **Stop condition:** Contract tests pass; no stub `apply_command()` is exposed.
 - **Commit:** `feat(core): define accelerate command contract`
 
 ### Checkpoint 5 — Apply manual acceleration
 
-- **Goal:** Apply Accelerate from either stopped manual station state atomically.
+- **Goal:** Apply Accelerate atomically from either stopped manual station state
+  and accept it idempotently while already Moving.
 - **Tests first:** Accelerate at time zero and during dwell, acceleration from
-  Ready, core-selected reversal, and all four rejections. Compare before/after
-  snapshots for rejection; also check unchanged domain timers, velocity, direction,
-  time, and unrelated trains. Cover no route from both Dwelling and Ready.
+  Ready, core-selected reversal, and the three rejection cases: `UnknownTrain`,
+  `NotManual`, and `NoOutgoingTrack`. Include an automatic Moving train to prove
+  control-mode validation precedes the idempotent return. Cover no route from
+  both Dwelling and Ready. Test duplicate Accelerate on a manual Moving train
+  both at elapsed zero and after traversal has advanced; require `Ok(())` and
+  an exact no-op. For each rejection and idempotent success, compare before/after
+  snapshots and domain state, proving unchanged train state, traversal elapsed
+  time, other domain timers, velocity, direction, simulation time, and unrelated trains.
 - **Likely files:** `src/simulation.rs`, `tests/manual_control.rs`.
 - **Smallest production change:** Complete `apply_command()` with validation and
-  commit; extract a private domain-valued track-selection helper only if useful.
-- **Expected behavior:** Successful commands set velocity 0 → 1 and enter Moving
-  at zero elapsed; Dwelling is not an error, and failed reverse lookup cannot change direction.
+  immediate idempotent return before station/route validation, and departure
+  commit in section 7's order; extract a private domain-valued track-selection
+  helper only if useful.
+- **Expected behavior:** Successful departures set velocity 0 → 1 and enter Moving
+  at zero elapsed. Already Moving returns `Ok(())` without any mutation or speed
+  increase; Dwelling is not an error, and failed reverse lookup cannot change direction.
 - **Stop condition:** All command branches work; existing automatic tests pass.
 - **Commit:** `feat(core): apply manual acceleration`
 
@@ -520,7 +556,7 @@ defer regressions. All paths below are relative to `metro-core/`.
 Use one core-only MVP PR with the seven educational commits, remaining draft while
 checkpoints are reviewed. Each checkpoint must compile and pass its relevant tests.
 Do not collapse checkpoints or start the next without the agreed review step.
-The PR should describe Accelerate, binary velocity, early movement, waiting,
+The PR should describe Accelerate's idempotent intent semantics, binary velocity, early movement, waiting,
 automatic stopping on arrival, unchanged automatic timing,
 and focused verification. Bevy integration and SPEC-003 are separate work.
 
@@ -528,7 +564,8 @@ and focused verification. Bevy integration and SPEC-003 are separate work.
 
 Selected: exactly one player action, `Accelerate { train_id }`; binary velocity;
 synchronous `Result<(), CommandError>`; fixed per-train control mode; automatic default; explicit manual constructor; early
-manual acceleration; automatic stopping on arrival; Ready retained as a dwell-completion
+manual acceleration; idempotent `Ok(())` without mutation for Accelerate while Moving;
+automatic stopping on arrival; Ready retained as a dwell-completion
 fact; existing core routing; unchanged one-second steps; core-only round-trip proof.
 
 No unresolved technical decision blocks this MVP. The velocity/state duplication

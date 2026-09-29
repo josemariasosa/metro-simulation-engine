@@ -1,8 +1,143 @@
+use metro_core::command::{CommandError, TrainCommand};
 use metro_core::dwell::DwellPolicy;
 use metro_core::network::Network;
 use metro_core::simulation::Simulation;
 use metro_core::snapshot::TrainSnapshotState;
+use metro_core::station::StationId;
 use metro_core::train::{AtStationState, Direction, Train, TrainId, TrainState};
+
+fn manual_a_b_simulation() -> Simulation {
+    let mut network = Network::new();
+    let a = network.add_station("A");
+    let b = network.add_station("B");
+    network.connect_bidirectional(a, b, 10);
+    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward);
+    Simulation::new(network, vec![train], DwellPolicy::new())
+}
+
+#[test]
+fn accelerate_manual_train_from_initial_dwell() {
+    let mut simulation = manual_a_b_simulation();
+    let before_time = simulation.elapsed_seconds;
+    let initial_snapshot = simulation.snapshot();
+
+    assert_eq!(before_time, 0);
+    assert_eq!(initial_snapshot.trains[0].velocity, 0);
+    assert_eq!(
+        initial_snapshot.trains[0].state,
+        TrainSnapshotState::Dwelling {
+            station: StationId(0),
+            remaining_seconds: 3,
+        }
+    );
+
+    // Departure is allowed before dwell completes; core chooses the destination.
+    let result = simulation.apply_command(TrainCommand::Accelerate {
+        train_id: TrainId(0),
+    });
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(simulation.elapsed_seconds, before_time);
+
+    let snapshot = simulation.snapshot();
+    let train = &snapshot.trains[0];
+
+    assert_eq!(train.velocity, 1);
+    assert_eq!(train.direction, Direction::Forward);
+    assert!(matches!(
+        train.state,
+        TrainSnapshotState::Moving {
+            from,
+            to,
+            elapsed_seconds: 0,
+            ..
+        } if from == StationId(0) && to == StationId(1)
+    ));
+}
+
+#[test]
+fn accelerate_manual_train_from_ready() {
+    let mut simulation = manual_a_b_simulation();
+
+    for _ in 0..3 {
+        simulation.step();
+    }
+
+    let before_time = simulation.elapsed_seconds;
+    let ready_snapshot = simulation.snapshot();
+
+    assert_eq!(before_time, 3);
+    assert_eq!(ready_snapshot.trains[0].velocity, 0);
+    assert_eq!(
+        ready_snapshot.trains[0].state,
+        TrainSnapshotState::Ready {
+            station: StationId(0),
+        }
+    );
+
+    let result = simulation.apply_command(TrainCommand::Accelerate {
+        train_id: TrainId(0),
+    });
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(simulation.elapsed_seconds, before_time);
+
+    let snapshot = simulation.snapshot();
+    let train = &snapshot.trains[0];
+
+    assert_eq!(train.velocity, 1);
+    assert_eq!(train.direction, Direction::Forward);
+    assert!(matches!(
+        train.state,
+        TrainSnapshotState::Moving {
+            from,
+            to,
+            elapsed_seconds: 0,
+            ..
+        } if from == StationId(0) && to == StationId(1)
+    ));
+}
+
+#[test]
+fn accelerate_while_manual_train_is_moving_is_idempotent() {
+    let mut network = Network::new();
+    let a = network.add_station("A");
+    let b = network.add_station("B");
+    network.connect_bidirectional(a, b, 10);
+    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward);
+    let other_train = Train::new_manual(TrainId(1), 100, b, Direction::Backward);
+    let mut simulation = Simulation::new(network, vec![train, other_train], DwellPolicy::new());
+
+    simulation
+        .apply_command(TrainCommand::Accelerate {
+            train_id: TrainId(0),
+        })
+        .unwrap();
+    simulation.step();
+
+    let before = simulation.snapshot();
+    assert_eq!(before.elapsed_seconds, 1);
+    assert_eq!(before.trains[0].velocity, 1);
+    assert_eq!(before.trains[0].direction, Direction::Forward);
+    assert!(matches!(
+        before.trains[0].state,
+        TrainSnapshotState::Moving {
+            from,
+            to,
+            elapsed_seconds: 1,
+            ..
+        } if from == a && to == b
+    ));
+
+    let result = simulation.apply_command(TrainCommand::Accelerate {
+        train_id: TrainId(0),
+    });
+    let after = simulation.snapshot();
+
+    assert_eq!(result, Ok(()));
+    // Includes the simulation clock and every train's state, direction and velocity.
+    assert_eq!(after, before);
+}
 
 #[test]
 fn manual_train_becomes_ready_after_dwell_completes() {
@@ -106,4 +241,173 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
         assert_eq!(simulation.snapshot().trains, ready_snapshot.trains);
     }
     assert_eq!(ready_snapshot.elapsed_seconds, 3);
+}
+
+// Compare domain timers as well as the public observation for every train.
+fn assert_command_unchanged(
+    simulation: &mut Simulation,
+    train_id: TrainId,
+    expected: Result<(), CommandError>,
+) {
+    let before = simulation.snapshot();
+    let domain_before: Vec<_> = simulation
+        .trains()
+        .iter()
+        .map(|train| (train.id, train.capacity, train.state, train.direction))
+        .collect();
+    assert_eq!(
+        simulation.apply_command(TrainCommand::Accelerate { train_id }),
+        expected
+    );
+    assert_eq!(simulation.snapshot(), before);
+    let domain_after: Vec<_> = simulation
+        .trains()
+        .iter()
+        .map(|train| (train.id, train.capacity, train.state, train.direction))
+        .collect();
+    assert_eq!(domain_after, domain_before);
+}
+
+#[test]
+fn command_rejections_preserve_all_trains_and_timers() {
+    let mut network = Network::new();
+    let a = network.add_station("A");
+    let b = network.add_station("B");
+    let isolated = network.add_station("Isolated");
+    network.connect_bidirectional(a, b, 10);
+    let trains = vec![
+        Train::new(TrainId(10), 100, a, Direction::Forward),
+        Train::new_manual(TrainId(20), 100, isolated, Direction::Forward),
+        Train::new_manual(TrainId(30), 100, a, Direction::Forward),
+    ];
+    let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
+    for steps in 0..=3 {
+        // An in-bounds vector index is still unknown when no TrainId matches it.
+        assert_command_unchanged(&mut simulation, TrainId(0), Err(CommandError::UnknownTrain));
+        assert_command_unchanged(
+            &mut simulation,
+            TrainId(999),
+            Err(CommandError::UnknownTrain),
+        );
+        assert_command_unchanged(&mut simulation, TrainId(10), Err(CommandError::NotManual));
+        assert_command_unchanged(
+            &mut simulation,
+            TrainId(20),
+            Err(CommandError::NoOutgoingTrack),
+        );
+        if steps < 3 {
+            simulation.step();
+        }
+    }
+    assert!(matches!(
+        simulation.trains()[0].state,
+        TrainState::Moving { .. }
+    ));
+    assert!(matches!(
+        simulation.trains()[1].state,
+        TrainState::AtStation {
+            state: AtStationState::Ready,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
+    let mut network = Network::new();
+    let a = network.add_station("A");
+    let b = network.add_station("B");
+    network.connect_bidirectional(a, b, 10);
+    let train = Train::new_manual(TrainId(42), 100, b, Direction::Backward);
+    let other = Train::new(TrainId(7), 200, a, Direction::Forward);
+    let mut simulation = Simulation::new(network, vec![other, train], DwellPolicy::new());
+    simulation
+        .apply_command(TrainCommand::Accelerate {
+            train_id: TrainId(42),
+        })
+        .unwrap();
+
+    for elapsed_seconds in 0..=1 {
+        assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
+        assert_eq!(
+            simulation.trains()[1].state,
+            TrainState::Moving {
+                from: b,
+                to: a,
+                elapsed_seconds,
+            }
+        );
+        assert_eq!(simulation.trains()[1].direction, Direction::Backward);
+        assert_eq!(simulation.snapshot().trains[1].velocity, 1);
+        // Include the unrelated train's raw dwell timers, which snapshots collapse
+        // to remaining_seconds, at both zero and nonzero traversal time.
+        assert_command_unchanged(&mut simulation, TrainId(42), Ok(()));
+        if elapsed_seconds == 0 {
+            simulation.step();
+        }
+    }
+}
+
+#[test]
+fn acceleration_selects_current_direction_or_reverse_fallback() {
+    // Exercise both directions, endpoints, and a missing forward track at B.
+    for (station, direction, gap, expected_to, expected_direction) in [
+        (1, Direction::Forward, false, 2, Direction::Forward),
+        (1, Direction::Backward, false, 0, Direction::Backward),
+        (2, Direction::Forward, false, 1, Direction::Backward),
+        (0, Direction::Backward, false, 1, Direction::Forward),
+        (1, Direction::Forward, true, 0, Direction::Backward),
+    ] {
+        let mut network = Network::new();
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+        let c = network.add_station("C");
+        network.connect_bidirectional(a, b, 10);
+        if !gap {
+            network.connect_bidirectional(b, c, 10);
+        }
+        let train = Train::new_manual(TrainId(42), 100, StationId(station), direction);
+        let other = Train::new_manual(TrainId(7), 100, a, Direction::Forward);
+        let mut simulation = Simulation::new(network, vec![other, train], DwellPolicy::new());
+        simulation.step();
+        let before = simulation.snapshot();
+        assert_eq!(
+            simulation.trains()[1].state,
+            TrainState::AtStation {
+                station: StationId(station),
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 1,
+                    dwell_seconds: 3,
+                },
+            }
+        );
+        simulation
+            .apply_command(TrainCommand::Accelerate {
+                train_id: TrainId(42),
+            })
+            .unwrap();
+        let after = simulation.snapshot();
+        assert_eq!(after.elapsed_seconds, before.elapsed_seconds);
+        assert_eq!(after.trains[0], before.trains[0]);
+        assert_eq!(after.trains[1].direction, expected_direction);
+        assert_eq!(after.trains[1].velocity, 1);
+        // The unfinished dwell is replaced, and no traversal second is consumed.
+        assert_eq!(
+            simulation.trains()[1].state,
+            TrainState::Moving {
+                from: StationId(station),
+                to: StationId(expected_to),
+                elapsed_seconds: 0,
+            }
+        );
+        assert_eq!(
+            after.trains[1].state,
+            TrainSnapshotState::Moving {
+                from: StationId(station),
+                to: StationId(expected_to),
+                elapsed_seconds: 0,
+                travel_seconds: 10,
+            }
+        );
+    }
 }

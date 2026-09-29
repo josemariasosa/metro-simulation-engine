@@ -1,3 +1,4 @@
+use crate::command::{CommandError, TrainCommand};
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
@@ -35,6 +36,51 @@ impl Simulation {
             network,
             trains,
             dwell_policy,
+        }
+    }
+
+    /// Applies a command without advancing time. Rejections leave state unchanged.
+    pub fn apply_command(&mut self, command: TrainCommand) -> Result<(), CommandError> {
+        match command {
+            TrainCommand::Accelerate { train_id } => {
+                let index = self
+                    .trains
+                    .iter()
+                    .position(|train| train.id == train_id)
+                    .ok_or(CommandError::UnknownTrain)?;
+                let train = &self.trains[index];
+
+                if train.control != TrainControl::Manual {
+                    return Err(CommandError::NotManual);
+                }
+
+                let station = match train.state {
+                    TrainState::Moving { .. } => return Ok(()),
+                    TrainState::AtStation { station, .. } => station,
+                };
+                let direction = train.direction;
+                let (selected_direction, to) = self
+                    .network
+                    .next_track(station, direction)
+                    .map(|track| (direction, track.to))
+                    .or_else(|| {
+                        let reversed = direction.reverse();
+                        self.network
+                            .next_track(station, reversed)
+                            .map(|track| (reversed, track.to))
+                    })
+                    .ok_or(CommandError::NoOutgoingTrack)?;
+
+                let train = &mut self.trains[index];
+                train.direction = selected_direction;
+                train.velocity = 1;
+                train.state = TrainState::Moving {
+                    from: station,
+                    to,
+                    elapsed_seconds: 0,
+                };
+                Ok(())
+            }
         }
     }
 
