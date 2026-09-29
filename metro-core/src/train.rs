@@ -72,6 +72,28 @@ impl Train {
             velocity: 0,
         }
     }
+
+    pub fn new_manual(
+        id: TrainId,
+        capacity: usize,
+        station: StationId,
+        direction: Direction,
+    ) -> Self {
+        Self {
+            id,
+            capacity,
+            state: TrainState::AtStation {
+                station,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
+            },
+            direction,
+            control: TrainControl::Manual,
+            velocity: 0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -169,5 +191,26 @@ mod tests {
         let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
 
         assert_eq!(train.velocity, 0);
+    }
+
+    #[test]
+    fn new_manual_train_is_manual_and_starts_stopped() {
+        let station = StationId(0);
+
+        let train = Train::new_manual(TrainId(0), 100, station, Direction::Forward);
+
+        assert_eq!(train.control, TrainControl::Manual);
+        assert_eq!(train.velocity, 0);
+
+        assert_eq!(
+            train.state,
+            TrainState::AtStation {
+                station,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 3,
+                },
+            }
+        );
     }
 }
