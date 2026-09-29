@@ -1,6 +1,6 @@
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
-use crate::snapshot::TrainSnapshotState;
+use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
 use crate::train::{AtStationState, Train, TrainState};
 
@@ -35,6 +35,56 @@ impl Simulation {
             network,
             trains,
             dwell_policy,
+        }
+    }
+
+    /// Returns an owned observation of the current state in train vector order.
+    pub fn snapshot(&self) -> SimulationSnapshot {
+        SimulationSnapshot {
+            elapsed_seconds: self.elapsed_seconds,
+            trains: self
+                .trains
+                .iter()
+                .map(|train| self.snapshot_train(train))
+                .collect(),
+        }
+    }
+
+    fn snapshot_train(&self, train: &Train) -> TrainSnapshot {
+        TrainSnapshot {
+            id: train.id,
+            direction: train.direction,
+            state: self.snapshot_train_state(&train.state),
+        }
+    }
+
+    fn snapshot_train_state(&self, state: &TrainState) -> TrainSnapshotState {
+        match state {
+            TrainState::AtStation {
+                station,
+                state:
+                    AtStationState::Dwelling {
+                        elapsed_seconds,
+                        dwell_seconds,
+                    },
+            } => dwelling_snapshot_state(*station, *elapsed_seconds, *dwell_seconds),
+            TrainState::Moving {
+                from,
+                to,
+                elapsed_seconds,
+            } => {
+                let track = self
+                    .network
+                    .track(*from, *to)
+                    .expect("moving train must reference an existing track");
+
+                TrainSnapshotState::Moving {
+                    from: *from,
+                    to: *to,
+                    elapsed_seconds: *elapsed_seconds,
+                    travel_seconds: track.travel_seconds,
+                }
+            }
         }
     }
 
