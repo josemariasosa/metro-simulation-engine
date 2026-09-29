@@ -1,5 +1,6 @@
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
+use crate::snapshot::TrainSnapshotState;
 use crate::station::StationId;
 use crate::train::{AtStationState, Train, TrainState};
 
@@ -9,6 +10,22 @@ pub struct Simulation {
     pub network: Network,
     trains: Vec<Train>,
     dwell_policy: DwellPolicy,
+}
+
+fn dwelling_snapshot_state(
+    station: StationId,
+    elapsed_seconds: u64,
+    dwell_seconds: u64,
+) -> TrainSnapshotState {
+    assert!(
+        elapsed_seconds < dwell_seconds,
+        "dwelling elapsed time must be less than dwell duration"
+    );
+
+    TrainSnapshotState::Dwelling {
+        station,
+        remaining_seconds: dwell_seconds - elapsed_seconds,
+    }
 }
 
 impl Simulation {
@@ -127,9 +144,7 @@ impl Simulation {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        train::{Direction, Train, TrainId, TrainState},
-    };
+    use crate::train::{Direction, Train, TrainId, TrainState};
 
     use super::*;
 
@@ -520,6 +535,33 @@ mod tests {
                 from: b,
                 to: a,
                 elapsed_seconds: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn initial_dwelling_state_maps_to_snapshot_state() {
+        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
+
+        let TrainState::AtStation {
+            station,
+            state:
+                AtStationState::Dwelling {
+                    elapsed_seconds,
+                    dwell_seconds,
+                },
+        } = train.state
+        else {
+            panic!("expected train to start dwelling");
+        };
+
+        let snapshot_state = dwelling_snapshot_state(station, elapsed_seconds, dwell_seconds);
+
+        assert_eq!(
+            snapshot_state,
+            TrainSnapshotState::Dwelling {
+                station: StationId(0),
+                remaining_seconds: 3,
             }
         );
     }
