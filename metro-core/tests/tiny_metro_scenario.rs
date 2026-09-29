@@ -52,6 +52,9 @@ fn assert_train_dwelling_at(train_state: &TrainState, test_station: &StationId) 
                     assert_eq!(*elapsed_seconds, 0);
                     assert_eq!(*dwell_seconds, 3);
                 }
+                AtStationState::Ready => {
+                    panic!("automatic train must not enter Ready state");
+                }
             }
         }
         _ => panic!("train should start at station {:?}", test_station),

@@ -117,6 +117,28 @@ fn snapshot_reports_initial_dwelling_state() {
 }
 
 #[test]
+fn snapshot_represents_ready_manual_train() {
+    let mut network = Network::new();
+    let station_a = network.add_station("A");
+    let station_b = network.add_station("B");
+    network.connect_bidirectional(station_a, station_b, 6);
+    let train = Train::new_manual(TrainId(0), 100, station_a, Direction::Forward);
+    let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
+
+    for _ in 0..3 {
+        simulation.step();
+    }
+
+    let snapshot = simulation.snapshot();
+
+    assert_eq!(
+        snapshot.trains[0].state,
+        TrainSnapshotState::Ready { station: station_a }
+    );
+    assert_eq!(snapshot.trains[0].velocity, 0);
+}
+
+#[test]
 fn snapshot_reports_departure_with_zero_elapsed_time() {
     let mut simulation = test_simulation(6);
     for _ in 0..3 {

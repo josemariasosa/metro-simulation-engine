@@ -43,6 +43,7 @@ pub enum AtStationState {
         elapsed_seconds: u64,
         dwell_seconds: u64,
     },
+    Ready,
 }
 
 #[derive(Debug, Clone)]

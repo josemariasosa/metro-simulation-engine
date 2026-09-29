@@ -2,7 +2,7 @@ use crate::dwell::DwellPolicy;
 use crate::network::Network;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Train, TrainState};
+use crate::train::{AtStationState, Train, TrainControl, TrainState};
 
 #[derive(Debug)]
 pub struct Simulation {
@@ -69,6 +69,10 @@ impl Simulation {
                         dwell_seconds,
                     },
             } => dwelling_snapshot_state(*station, *elapsed_seconds, *dwell_seconds),
+            TrainState::AtStation {
+                station,
+                state: AtStationState::Ready,
+            } => TrainSnapshotState::Ready { station: *station },
             TrainState::Moving {
                 from,
                 to,
@@ -109,29 +113,43 @@ impl Simulation {
                         },
                     };
                 } else {
-                    match network.next_track(station, train.direction) {
-                        Some(next_track) => {
-                            train.state = TrainState::Moving {
-                                from: station,
-                                to: next_track.to,
-                                elapsed_seconds: 0,
-                            };
-                            train.velocity = 1;
+                    match train.control {
+                        TrainControl::Automatic => {
+                            match network.next_track(station, train.direction) {
+                                Some(next_track) => {
+                                    train.state = TrainState::Moving {
+                                        from: station,
+                                        to: next_track.to,
+                                        elapsed_seconds: 0,
+                                    };
+                                    train.velocity = 1;
+                                }
+                                None => {
+                                    let next_track = network
+                                        .next_track(station, train.direction.reverse())
+                                        .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
+                                    train.state = TrainState::Moving {
+                                        from: station,
+                                        to: next_track.to,
+                                        elapsed_seconds: 0,
+                                    };
+                                    train.direction = train.direction.reverse();
+                                    train.velocity = 1;
+                                }
+                            }
                         }
-                        None => {
-                            let next_track = network
-                                .next_track(station, train.direction.reverse())
-                                .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
-                            train.state = TrainState::Moving {
-                                from: station,
-                                to: next_track.to,
-                                elapsed_seconds: 0,
+                        TrainControl::Manual => {
+                            train.state = TrainState::AtStation {
+                                station,
+                                state: AtStationState::Ready,
                             };
-                            train.direction = train.direction.reverse();
-                            train.velocity = 1;
+                            train.velocity = 0;
                         }
                     }
                 }
+            }
+            AtStationState::Ready => {
+                // Intentionally no train-state change while waiting for input.
             }
         }
     }

@@ -1,3 +1,4 @@
+pub mod command;
 pub mod dwell;
 pub mod network;
 pub mod simulation;

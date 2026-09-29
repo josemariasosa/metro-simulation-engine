@@ -21,6 +21,9 @@ pub enum TrainSnapshotState {
         station: StationId,
         remaining_seconds: u64,
     },
+    Ready {
+        station: StationId,
+    },
     Moving {
         from: StationId,
         to: StationId,
