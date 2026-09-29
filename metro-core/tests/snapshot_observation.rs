@@ -26,6 +26,64 @@ fn expected_snapshot(elapsed_seconds: u64, state: TrainSnapshotState) -> Simulat
 }
 
 #[test]
+fn repeated_snapshots_without_step_are_equal() {
+    let simulation = test_simulation(6);
+
+    let first = simulation.snapshot();
+    let second = simulation.snapshot();
+
+    assert_eq!(first, second);
+}
+
+#[test]
+fn retained_snapshot_does_not_change_after_simulation_advances() {
+    let mut simulation = test_simulation(6);
+
+    let old_snapshot = simulation.snapshot();
+    let expected = old_snapshot.clone();
+
+    simulation.step();
+    simulation.step();
+    simulation.step();
+
+    assert_eq!(old_snapshot, expected);
+    assert_ne!(simulation.snapshot(), old_snapshot);
+}
+
+#[test]
+fn modifying_snapshot_does_not_modify_simulation() {
+    let simulation = test_simulation(6);
+
+    let original = simulation.snapshot();
+    let mut local_copy = simulation.snapshot();
+
+    local_copy.elapsed_seconds = 999;
+    local_copy.trains.clear();
+
+    assert_ne!(local_copy, original);
+    assert_eq!(simulation.snapshot(), original);
+}
+
+#[test]
+fn observation_frequency_does_not_affect_simulation_result() {
+    let mut frequently_observed = test_simulation(6);
+    let mut sparsely_observed = test_simulation(6);
+
+    for _ in 0..12 {
+        frequently_observed.snapshot();
+        frequently_observed.snapshot();
+
+        frequently_observed.step();
+        sparsely_observed.step();
+    }
+
+    assert_eq!(
+        frequently_observed.snapshot(),
+        sparsely_observed.snapshot()
+    );
+}
+
+#[test]
 fn snapshot_reports_empty_simulation() {
     let mut simulation = Simulation::new(Network::new(), vec![], DwellPolicy::new());
     simulation.step();
