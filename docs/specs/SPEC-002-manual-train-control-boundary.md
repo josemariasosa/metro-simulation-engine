@@ -2,7 +2,14 @@
 
 ## 1. Status
 
-**Proposed — specification only; implementation is not authorized by this document.**
+**Complete — MVP implemented and Checkpoint 7 verified.**
+
+All ten Definition of Done requirements in section 6 are covered. Verification:
+`cargo test -p metro-core` passes all 65 tests, including the A↔B vertical slice,
+ordered command/step determinism, observation independence, and the unchanged
+five-station timing regression at seconds 732, 735, and 736. The current-state
+description below records the pre-implementation baseline; the checkpoint plan
+is retained as implementation history.
 
 This specifies an independently useful MVP following the implemented observation
 boundary in [SPEC-001](SPEC-001-core-observation-boundary.md).
