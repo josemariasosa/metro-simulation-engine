@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+mod presentation;
 mod scenario;
 
 #[derive(Component)]
@@ -16,7 +17,7 @@ fn main() {
     scenario::initialize_scenario(&mut app);
 
     app.add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, presentation::setup_stations))
         .add_systems(Update, (move_train, bounce_train))
         .run();
 }
