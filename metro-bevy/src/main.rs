@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+mod scenario;
+
 #[derive(Component)]
 struct Train {
     direction: f32,
@@ -10,8 +12,10 @@ struct Train {
 struct TrainBody;
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
+    let mut app = App::new();
+    scenario::initialize_scenario(&mut app);
+
+    app.add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
         .add_systems(Update, (move_train, bounce_train))
         .run();
