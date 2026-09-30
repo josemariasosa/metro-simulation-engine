@@ -152,7 +152,10 @@ fn format_train_status(
 // Keep system parameter types private to presentation.
 pub(super) fn register(app: &mut App) {
     app.add_systems(Startup, (setup_stations, setup_train))
-        .add_systems(Update, (present_trains, bounce_train));
+        .add_systems(
+            Update,
+            (present_trains, bounce_train).after(crate::timing::drive_core),
+        );
 }
 
 fn setup_train(mut commands: Commands, assets: Res<AssetServer>, player: Res<PlayerTrain>) {
@@ -381,6 +384,46 @@ mod tests {
             assert_eq!(
                 app.world().resource::<CoreSimulation>().0.snapshot(),
                 initial
+            );
+        }
+    }
+
+    #[test]
+    fn driver_publishes_before_presentation_and_root_stays_at_a() {
+        use crate::scenario::initialize_scenario;
+        use bevy::time::Real;
+        use std::time::Duration;
+
+        let mut app = App::new();
+        initialize_scenario(&mut app);
+        let layout = StationLayout::from_scenario(app.world().resource::<ScenarioStations>());
+        let player = app.world().resource::<PlayerTrain>().0;
+        app.insert_resource(layout)
+            .insert_resource(Time::<Real>::default())
+            .add_systems(Update, present_trains.after(crate::timing::drive_core));
+        crate::timing::register(&mut app);
+        let (root, status, _) = spawn_test_train(&mut app, player);
+
+        for (milliseconds, expected) in [
+            (0, "Dwelling at A — 3s"),
+            (400, "Dwelling at A — 3s"),
+            (600, "Dwelling at A — 2s"),
+            (1000, "Dwelling at A — 1s"),
+            (1000, "Ready at A"),
+            (10_500, "Ready at A"),
+        ] {
+            app.world_mut()
+                .resource_mut::<Time<Real>>()
+                .advance_by(Duration::from_millis(milliseconds));
+            app.update();
+            assert_eq!(app.world().get::<Text2d>(status).unwrap().0, expected);
+            assert_eq!(
+                app.world().get::<Transform>(root).unwrap().translation,
+                Vec3::new(-300.0, 0.0, 4.0)
+            );
+            assert_eq!(
+                *app.world().get::<Visibility>(root).unwrap(),
+                Visibility::Inherited
             );
         }
     }
