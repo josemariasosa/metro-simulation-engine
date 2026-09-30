@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use metro_core::station::StationId;
-use metro_core::train::TrainId;
+use metro_core::train::{Direction, TrainId};
 
-use crate::scenario::ScenarioStations;
+use crate::scenario::{LatestSnapshot, PlayerTrain, ScenarioStations};
 
 struct StationPresentation {
     // Matches snapshot stations by identity, independently of layout order.
@@ -17,6 +17,13 @@ struct StationPresentation {
 struct StationLayout([StationPresentation; 4]);
 
 impl StationLayout {
+    fn label(&self, station: StationId) -> Option<&'static str> {
+        self.0
+            .iter()
+            .find(|entry| entry.id == station)
+            .map(|entry| entry.label)
+    }
+
     fn position(&self, station: StationId) -> Option<Vec2> {
         self.0
             .iter()
@@ -87,6 +94,156 @@ fn find_train_snapshot(snapshot: &SimulationSnapshot, train_id: TrainId) -> Opti
     snapshot.trains.iter().find(|train| train.id == train_id)
 }
 
+#[derive(Component)]
+struct TrainEntity {
+    train_id: TrainId,
+}
+
+#[derive(Component)]
+struct TrainBody;
+
+#[derive(Component)]
+struct TrainArtwork;
+
+#[derive(Component)]
+struct TrainStatus;
+
+#[derive(Debug, PartialEq, Eq)]
+enum PresentationError {
+    MissingTrainSnapshot(TrainId),
+    Projection(ProjectionError),
+}
+
+#[derive(Component, Default)]
+struct PresentationDiagnostic(Option<PresentationError>);
+
+fn format_train_status(
+    state: &TrainSnapshotState,
+    layout: &StationLayout,
+) -> Result<String, ProjectionError> {
+    let label = |station| {
+        layout
+            .label(station)
+            .ok_or(ProjectionError::UnknownStation(station))
+    };
+    Ok(match state {
+        TrainSnapshotState::Dwelling {
+            station,
+            remaining_seconds,
+        } => {
+            format!("Dwelling at {} — {remaining_seconds}s", label(*station)?)
+        }
+        TrainSnapshotState::Ready { station } => format!("Ready at {}", label(*station)?),
+        TrainSnapshotState::Moving {
+            from,
+            to,
+            elapsed_seconds,
+            travel_seconds,
+        } => {
+            format!(
+                "Moving {} → {} — {elapsed_seconds}/{travel_seconds}",
+                label(*from)?,
+                label(*to)?
+            )
+        }
+    })
+}
+
+// Keep system parameter types private to presentation.
+pub(super) fn register(app: &mut App) {
+    app.add_systems(Startup, (setup_stations, setup_train))
+        .add_systems(Update, (present_trains, bounce_train));
+}
+
+fn setup_train(mut commands: Commands, assets: Res<AssetServer>, player: Res<PlayerTrain>) {
+    commands
+        .spawn((
+            TrainEntity { train_id: player.0 },
+            PresentationDiagnostic::default(),
+            Sprite::from_color(Color::srgb(1.0, 0.5, 0.0), Vec2::new(32.0, 12.0)),
+            Transform::default(),
+            Visibility::Hidden,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                TrainArtwork,
+                Sprite::from_image(assets.load("trains/train_base.png")),
+                Transform::from_xyz(0.0, 0.0, -4.0).with_scale(Vec3::splat(0.25)),
+            ));
+            parent.spawn((
+                TrainArtwork,
+                TrainBody,
+                Sprite::from_image(assets.load("trains/train_body.png")),
+                Transform::from_xyz(0.0, 0.0, -3.0).with_scale(Vec3::splat(0.25)),
+            ));
+            parent.spawn((
+                TrainStatus,
+                Text2d::new(""),
+                TextFont::from_font_size(24.0),
+                TextColor(Color::WHITE),
+                Transform::from_xyz(0.0, 70.0, 1.0),
+            ));
+        });
+}
+
+fn present_trains(
+    snapshot: Res<LatestSnapshot>,
+    layout: Res<StationLayout>,
+    mut trains: Query<(
+        &TrainEntity,
+        &mut Transform,
+        &mut Visibility,
+        &mut PresentationDiagnostic,
+        &Children,
+    )>,
+    mut statuses: Query<&mut Text2d, With<TrainStatus>>,
+    mut artwork: Query<&mut Sprite, With<TrainArtwork>>,
+) {
+    for (train, mut transform, mut visibility, mut diagnostic, children) in &mut trains {
+        let observation = find_train_snapshot(&snapshot.0, train.train_id)
+            .ok_or(PresentationError::MissingTrainSnapshot(train.train_id))
+            .and_then(|observed| {
+                let position = project_train_position(&observed.state, &layout)
+                    .map_err(PresentationError::Projection)?;
+                let status = format_train_status(&observed.state, &layout)
+                    .map_err(PresentationError::Projection)?;
+                Ok((position, status, observed.direction))
+            });
+        match observation {
+            Ok((position, status, direction)) => {
+                // The only runtime writer of logical train translation.
+                transform.translation = position.extend(4.0);
+                for child in children.iter() {
+                    if let Ok(mut text) = statuses.get_mut(child) {
+                        text.0.clone_from(&status);
+                    }
+                    if let Ok(mut sprite) = artwork.get_mut(child) {
+                        sprite.flip_x = direction == Direction::Backward;
+                    }
+                }
+                *visibility = Visibility::Inherited;
+                diagnostic.0 = None;
+            }
+            Err(error) => {
+                if diagnostic.0.as_ref() != Some(&error) {
+                    warn!("Train {:?}: {:?}", train.train_id, error);
+                    diagnostic.0 = Some(error);
+                }
+                *visibility = Visibility::Hidden;
+            }
+        }
+    }
+}
+
+fn bounce_train(
+    time: Res<Time>,
+    mut bodies: Query<&mut Transform, (With<TrainBody>, Without<TrainEntity>)>,
+) {
+    for mut transform in &mut bodies {
+        transform.translation.y = (time.elapsed_secs() * 8.0).sin() * 1.5;
+    }
+}
+
 pub(super) fn setup_stations(mut commands: Commands, stations: Res<ScenarioStations>) {
     let layout = StationLayout::from_scenario(&stations);
     let [a, _, _, d] = layout.0.each_ref();
@@ -121,6 +278,263 @@ mod tests {
     use super::*;
     use crate::scenario::ScenarioStation;
     use metro_core::train::Direction;
+
+    fn spawn_test_train(app: &mut App, id: TrainId) -> (Entity, Entity, Entity) {
+        let status = app.world_mut().spawn((TrainStatus, Text2d::new(""))).id();
+        let body = app
+            .world_mut()
+            .spawn((
+                TrainBody,
+                TrainArtwork,
+                Sprite::default(),
+                Transform::default(),
+            ))
+            .id();
+        let root = app
+            .world_mut()
+            .spawn((
+                TrainEntity { train_id: id },
+                PresentationDiagnostic::default(),
+                Transform::from_xyz(17.0, 29.0, 0.0),
+                Visibility::Hidden,
+            ))
+            .add_children(&[status, body])
+            .id();
+        (root, status, body)
+    }
+
+    fn observed(id: usize, state: TrainSnapshotState) -> TrainSnapshot {
+        TrainSnapshot {
+            id: TrainId(id),
+            direction: Direction::Backward,
+            state,
+            velocity: 0,
+        }
+    }
+
+    #[test]
+    fn status_uses_observed_states_and_station_labels() {
+        let layout = test_layout();
+        for (state, expected) in [
+            (
+                TrainSnapshotState::Dwelling {
+                    station: StationId(42),
+                    remaining_seconds: 3,
+                },
+                "Dwelling at A — 3s",
+            ),
+            (
+                TrainSnapshotState::Ready {
+                    station: StationId(7),
+                },
+                "Ready at B",
+            ),
+            (moving(42, 7, 1, 3), "Moving A → B — 1/3"),
+            (moving(7, 42, 2, 3), "Moving B → A — 2/3"),
+        ] {
+            assert_eq!(format_train_status(&state, &layout).unwrap(), expected);
+        }
+        for state in [
+            TrainSnapshotState::Dwelling {
+                station: StationId(999),
+                remaining_seconds: 3,
+            },
+            TrainSnapshotState::Ready {
+                station: StationId(999),
+            },
+            moving(999, 7, 1, 3),
+            moving(42, 999, 1, 3),
+        ] {
+            assert_eq!(
+                format_train_status(&state, &layout),
+                Err(ProjectionError::UnknownStation(StationId(999)))
+            );
+        }
+    }
+
+    #[test]
+    fn initial_fixture_stays_at_a_across_render_updates() {
+        use crate::scenario::{CoreSimulation, initialize_scenario};
+        let mut app = App::new();
+        initialize_scenario(&mut app);
+        let initial = app.world().resource::<LatestSnapshot>().0.clone();
+        let layout = StationLayout::from_scenario(app.world().resource::<ScenarioStations>());
+        let player = app.world().resource::<PlayerTrain>().0;
+        app.insert_resource(layout)
+            .add_systems(Update, present_trains);
+        let (root, status, _) = spawn_test_train(&mut app, player);
+        for _ in 0..20 {
+            app.update();
+            assert_eq!(
+                app.world().get::<Transform>(root).unwrap().translation,
+                Vec3::new(-300.0, 0.0, 4.0)
+            );
+            assert_eq!(
+                *app.world().get::<Visibility>(root).unwrap(),
+                Visibility::Inherited
+            );
+            assert_eq!(
+                app.world().get::<Text2d>(status).unwrap().0,
+                "Dwelling at A — 3s"
+            );
+            assert_eq!(app.world().resource::<LatestSnapshot>().0, initial);
+            assert_eq!(
+                app.world().resource::<CoreSimulation>().0.snapshot(),
+                initial
+            );
+        }
+    }
+
+    #[test]
+    fn presentation_needs_only_cached_observations_and_matches_ids() {
+        let mut app = App::new();
+        app.insert_resource(test_layout())
+            .insert_resource(LatestSnapshot(SimulationSnapshot {
+                elapsed_seconds: 0,
+                trains: vec![
+                    observed(
+                        9,
+                        TrainSnapshotState::Ready {
+                            station: StationId(101),
+                        },
+                    ),
+                    observed(
+                        42,
+                        TrainSnapshotState::Ready {
+                            station: StationId(7),
+                        },
+                    ),
+                ],
+            }))
+            .add_systems(Update, present_trains);
+        let (root, status, body) = spawn_test_train(&mut app, TrainId(42));
+        for _ in 0..2 {
+            app.update();
+            assert_eq!(
+                app.world().get::<Transform>(root).unwrap().translation,
+                Vec3::new(-100.0, 0.0, 4.0)
+            );
+            assert_eq!(app.world().get::<Text2d>(status).unwrap().0, "Ready at B");
+            assert!(app.world().get::<Sprite>(body).unwrap().flip_x);
+            app.world_mut()
+                .resource_mut::<LatestSnapshot>()
+                .0
+                .trains
+                .reverse();
+        }
+    }
+
+    #[test]
+    fn invalid_observations_hide_without_fabricating_positions_and_recover() {
+        let mut app = App::new();
+        app.insert_resource(test_layout())
+            .insert_resource(LatestSnapshot(SimulationSnapshot {
+                elapsed_seconds: 0,
+                trains: vec![],
+            }))
+            .add_systems(Update, present_trains);
+        let (root, status, _) = spawn_test_train(&mut app, TrainId(42));
+        let invalid = [
+            (None, PresentationError::MissingTrainSnapshot(TrainId(42))),
+            (
+                Some(TrainSnapshotState::Ready {
+                    station: StationId(999),
+                }),
+                PresentationError::Projection(ProjectionError::UnknownStation(StationId(999))),
+            ),
+            (
+                Some(moving(42, 7, 0, 0)),
+                PresentationError::Projection(ProjectionError::ZeroTravelDuration),
+            ),
+            (
+                Some(moving(42, 7, 3, 3)),
+                PresentationError::Projection(ProjectionError::ElapsedNotBeforeArrival),
+            ),
+        ];
+        for (state, error) in invalid {
+            let retained = app.world().get::<Transform>(root).unwrap().translation;
+            app.world_mut().resource_mut::<LatestSnapshot>().0.trains =
+                state.into_iter().map(|state| observed(42, state)).collect();
+            for _ in 0..2 {
+                app.update();
+                assert_eq!(
+                    *app.world().get::<Visibility>(root).unwrap(),
+                    Visibility::Hidden
+                );
+                assert_eq!(
+                    app.world().get::<Transform>(root).unwrap().translation,
+                    retained
+                );
+                assert_eq!(
+                    app.world()
+                        .get::<PresentationDiagnostic>(root)
+                        .unwrap()
+                        .0
+                        .as_ref(),
+                    Some(&error)
+                );
+            }
+            app.world_mut().resource_mut::<LatestSnapshot>().0.trains =
+                vec![observed(42, moving(7, 42, 1, 3))];
+            app.update();
+            assert_eq!(
+                *app.world().get::<Visibility>(root).unwrap(),
+                Visibility::Inherited
+            );
+            assert_position_close(
+                app.world()
+                    .get::<Transform>(root)
+                    .unwrap()
+                    .translation
+                    .truncate(),
+                Vec2::new(-166.666667, 0.0),
+            );
+            assert_eq!(
+                app.world().get::<Text2d>(status).unwrap().0,
+                "Moving B → A — 1/3"
+            );
+            assert!(
+                app.world()
+                    .get::<PresentationDiagnostic>(root)
+                    .unwrap()
+                    .0
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn cosmetic_time_moves_only_the_body_child() {
+        let mut app = App::new();
+        app.insert_resource(test_layout())
+            .insert_resource(Time::<()>::default())
+            .insert_resource(LatestSnapshot(SimulationSnapshot {
+                elapsed_seconds: 0,
+                trains: vec![observed(
+                    42,
+                    TrainSnapshotState::Ready {
+                        station: StationId(42),
+                    },
+                )],
+            }))
+            .add_systems(Update, (present_trains, bounce_train));
+        let (root, _, body) = spawn_test_train(&mut app, TrainId(42));
+        app.update();
+        let root_position = app.world().get::<Transform>(root).unwrap().translation;
+        let body_position = app.world().get::<Transform>(body).unwrap().translation;
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_millis(100));
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(root).unwrap().translation,
+            root_position
+        );
+        assert_ne!(
+            app.world().get::<Transform>(body).unwrap().translation.y,
+            body_position.y
+        );
+    }
 
     fn test_layout() -> StationLayout {
         StationLayout::from_scenario(&ScenarioStations(

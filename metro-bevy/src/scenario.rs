@@ -23,7 +23,7 @@ pub(super) struct ScenarioStation {
 #[derive(Resource)]
 pub(super) struct ScenarioStations(pub(super) [ScenarioStation; 4]);
 
-/// Own the dormant core scenario independently of the visual prototype.
+/// Own the dormant core scenario and capture its initial presentation snapshot.
 pub(super) fn initialize_scenario(app: &mut App) {
     let mut network = Network::new();
     let stations = ["A", "B", "C", "D"].map(|label| ScenarioStation {
