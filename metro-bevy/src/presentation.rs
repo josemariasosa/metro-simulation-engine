@@ -253,6 +253,13 @@ pub(super) fn setup_stations(mut commands: Commands, stations: Res<ScenarioStati
     let midpoint = (a.position + d.position) / 2.0;
 
     commands.spawn((
+        Text2d::new("Space: Accelerate"),
+        TextFont::from_font_size(24.0),
+        TextColor(Color::WHITE),
+        Transform::from_xyz(midpoint.x, -90.0, 3.0),
+    ));
+
+    commands.spawn((
         Sprite::from_color(
             Color::srgb(0.6, 0.6, 0.6),
             Vec2::new(d.position.x - a.position.x, 3.0),
@@ -400,6 +407,7 @@ mod tests {
         let player = app.world().resource::<PlayerTrain>().0;
         app.insert_resource(layout)
             .insert_resource(Time::<Real>::default())
+            .init_resource::<ButtonInput<KeyCode>>()
             .add_systems(Update, present_trains.after(crate::timing::drive_core));
         crate::timing::register(&mut app);
         let (root, status, _) = spawn_test_train(&mut app, player);
@@ -426,6 +434,22 @@ mod tests {
                 Visibility::Inherited
             );
         }
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.world_mut()
+            .resource_mut::<Time<Real>>()
+            .advance_by(Duration::ZERO);
+        app.update();
+        assert_eq!(
+            app.world().get::<Text2d>(status).unwrap().0,
+            "Moving A → B — 0/3"
+        );
+        assert_eq!(
+            app.world().get::<Transform>(root).unwrap().translation,
+            Vec3::new(-300.0, 0.0, 4.0)
+        );
     }
 
     #[test]
