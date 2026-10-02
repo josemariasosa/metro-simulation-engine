@@ -318,7 +318,7 @@ fn manual_train_remains_ready_without_input() {
     simulation.step();
 
     let ready_state = simulation.trains()[0].state;
-    let direction = simulation.trains()[0].direction;
+    let direction = simulation.trains()[0].direction();
     assert_eq!(simulation.elapsed_seconds, 3);
     assert_eq!(
         ready_state,
@@ -334,7 +334,7 @@ fn manual_train_remains_ready_without_input() {
 
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
         assert_eq!(simulation.trains()[0].state, ready_state);
-        assert_eq!(simulation.trains()[0].direction, direction);
+        assert_eq!(simulation.trains()[0].direction(), direction);
         assert_eq!(simulation.snapshot().trains[0].velocity, 0);
     }
 }
@@ -360,7 +360,7 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
     for elapsed_seconds in 4..=10 {
         simulation.step();
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
-        assert_eq!(simulation.trains()[0].direction, Direction::Forward);
+        assert_eq!(simulation.trains()[0].direction(), Direction::Forward);
         assert_eq!(
             simulation.trains()[0].state,
             TrainState::AtStation {
@@ -384,7 +384,7 @@ fn assert_command_unchanged(
     let domain_before: Vec<_> = simulation
         .trains()
         .iter()
-        .map(|train| (train.id, train.capacity, train.state, train.direction))
+        .map(|train| (train.id, train.capacity, train.state, train.direction()))
         .collect();
     assert_eq!(
         simulation.apply_command(TrainCommand::Accelerate { train_id }),
@@ -394,7 +394,7 @@ fn assert_command_unchanged(
     let domain_after: Vec<_> = simulation
         .trains()
         .iter()
-        .map(|train| (train.id, train.capacity, train.state, train.direction))
+        .map(|train| (train.id, train.capacity, train.state, train.direction()))
         .collect();
     assert_eq!(domain_after, domain_before);
 }
@@ -539,7 +539,7 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
                 elapsed_seconds,
             }
         );
-        assert_eq!(simulation.trains()[1].direction, Direction::Backward);
+        assert_eq!(simulation.trains()[1].direction(), Direction::Backward);
         assert_eq!(simulation.snapshot().trains[1].velocity, 1);
         // Include the unrelated train's raw dwell timers, which snapshots collapse
         // to remaining_seconds, at both zero and nonzero traversal time.
@@ -737,7 +737,10 @@ fn ordered_commands_and_steps_are_deterministic_despite_observation_frequency() 
         // Compare committed domain state at every boundary without observing sparse.
         assert_eq!(frequent.elapsed_seconds, sparse.elapsed_seconds);
         assert_eq!(frequent.trains()[0].state, sparse.trains()[0].state);
-        assert_eq!(frequent.trains()[0].direction, sparse.trains()[0].direction);
+        assert_eq!(
+            frequent.trains()[0].direction(),
+            sparse.trains()[0].direction()
+        );
     }
     assert_eq!(frequent.snapshot(), sparse.snapshot());
 }

@@ -46,7 +46,7 @@ impl ResourceView {
                 TrainState::AtStation { station, .. } => {
                     let slot = StationSlot {
                         station,
-                        direction: train.direction,
+                        direction: train.direction(),
                     };
                     assert!(
                         !view.station_reservations.contains_key(&slot),
@@ -67,7 +67,7 @@ impl ResourceView {
                     view.reserve_station(
                         StationSlot {
                             station: to,
-                            direction: train.direction,
+                            direction: train.direction(),
                         },
                         train.id,
                     );
@@ -160,7 +160,7 @@ mod tests {
 
             assert_eq!(simulation.elapsed_seconds, 0);
             let train = &simulation.trains()[0];
-            assert_eq!(train.direction, direction);
+            assert_eq!(train.direction(), direction);
             assert_eq!(train.velocity(), 1);
             assert_eq!(
                 train.state,
@@ -332,7 +332,7 @@ mod tests {
             };
             let mut backward = forward.clone();
             backward.id = TrainId(2);
-            backward.direction = Direction::Backward;
+            backward.set_direction_for_test(Direction::Backward);
             let view = ResourceView::derive(&[forward, backward]);
             for (direction, id) in [
                 (Direction::Forward, TrainId(1)),

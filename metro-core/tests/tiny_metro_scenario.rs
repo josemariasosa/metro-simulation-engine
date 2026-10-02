@@ -77,10 +77,10 @@ fn trains_start_at_opposite_endpoints_in_opposite_directions() {
     assert_eq!(simulation.trains()[0].id, TrainId(0));
     assert_eq!(simulation.trains()[1].id, TrainId(1));
 
-    assert_eq!(simulation.trains()[0].direction, Direction::Forward);
+    assert_eq!(simulation.trains()[0].direction(), Direction::Forward);
     assert_train_dwelling_at(&simulation.trains()[0].state, &a);
 
-    assert_eq!(simulation.trains()[1].direction, Direction::Backward);
+    assert_eq!(simulation.trains()[1].direction(), Direction::Backward);
     assert_train_dwelling_at(&simulation.trains()[1].state, &e);
 }
 
@@ -273,6 +273,6 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         }
     );
 
-    assert_eq!(simulation.trains()[0].direction, Direction::Backward);
-    assert_eq!(simulation.trains()[1].direction, Direction::Forward);
+    assert_eq!(simulation.trains()[0].direction(), Direction::Backward);
+    assert_eq!(simulation.trains()[1].direction(), Direction::Forward);
 }

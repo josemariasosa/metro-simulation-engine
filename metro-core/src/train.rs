@@ -51,7 +51,7 @@ pub struct Train {
     pub id: TrainId,
     pub capacity: usize,
     pub state: TrainState,
-    pub direction: Direction,
+    direction: Direction,
     control: TrainControl,
     velocity: u8,
 }
@@ -105,6 +105,10 @@ impl Train {
 
     pub(crate) fn velocity(&self) -> u8 {
         self.velocity
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     pub(crate) fn apply_departure(&mut self, candidate: DepartureCandidate) {
@@ -195,6 +199,10 @@ impl Train {
             to,
             elapsed_seconds,
         };
+    }
+
+    pub(crate) fn set_direction_for_test(&mut self, direction: Direction) {
+        self.direction = direction;
     }
 }
 

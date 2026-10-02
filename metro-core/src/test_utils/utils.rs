@@ -15,7 +15,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
         match train.state {
             TrainState::AtStation { station, .. } => {
                 assert_eq!(train.velocity(), 0);
-                occupants.push((station, train.direction, train.id));
+                occupants.push((station, train.direction(), train.id));
             }
             TrainState::Moving {
                 from,
@@ -23,7 +23,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
                 elapsed_seconds,
             } => {
                 assert_eq!(train.velocity(), 1);
-                match train.direction {
+                match train.direction() {
                     Direction::Forward => assert_eq!(to.0, from.0 + 1),
                     Direction::Backward => assert_eq!(from.0, to.0 + 1),
                 }
@@ -34,7 +34,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
                 assert!(track.travel_seconds > 0);
                 assert!(elapsed_seconds < track.travel_seconds);
                 tracks.push((from, to, train.id));
-                reservations.push((to, train.direction, train.id));
+                reservations.push((to, train.direction(), train.id));
             }
         }
     }
