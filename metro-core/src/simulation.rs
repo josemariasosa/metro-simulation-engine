@@ -1,10 +1,14 @@
 use crate::command::{CommandError, TrainCommand};
+use crate::domain::departure::{
+    AutomaticDepartureDecision, AutomaticDepartureProposal, DepartureCandidate,
+};
+use crate::domain::departure::{can_admit_departure, select_departure_candidate};
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
 use crate::resource::ResourceView;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Direction, Train, TrainControl, TrainId, TrainState};
+use crate::train::{AtStationState, Train, TrainControl, TrainState};
 use std::collections::HashSet;
 
 #[derive(Debug)]
@@ -13,63 +17,6 @@ pub struct Simulation {
     pub network: Network,
     trains: Vec<Train>,
     dwell_policy: DwellPolicy,
-}
-
-struct DepartureCandidate {
-    from: StationId,
-    to: StationId,
-    direction: Direction,
-}
-
-struct AutomaticDepartureProposal {
-    train_index: usize,
-    train_id: TrainId,
-    candidate: DepartureCandidate,
-}
-
-enum AutomaticDepartureDecision {
-    NotEligible,
-    Accepted(DepartureCandidate),
-    Rejected { station: StationId },
-}
-
-fn select_departure_candidate(
-    network: &Network,
-    station: StationId,
-    direction: Direction,
-) -> Option<DepartureCandidate> {
-    network
-        .next_track(station, direction)
-        .map(|track| DepartureCandidate {
-            from: station,
-            to: track.to,
-            direction,
-        })
-        .or_else(|| {
-            let direction = direction.reverse();
-            network
-                .next_track(station, direction)
-                .map(|track| DepartureCandidate {
-                    from: station,
-                    to: track.to,
-                    direction,
-                })
-        })
-}
-
-fn can_admit_departure(candidate: &DepartureCandidate, resources: &ResourceView) -> bool {
-    resources.track_available(candidate.from, candidate.to)
-        && resources.station_slot_available(candidate.to, candidate.direction)
-}
-
-fn commit_departure(train: &mut Train, candidate: DepartureCandidate) {
-    train.direction = candidate.direction;
-    train.velocity = 1;
-    train.state = TrainState::Moving {
-        from: candidate.from,
-        to: candidate.to,
-        elapsed_seconds: 0,
-    };
 }
 
 fn dwelling_snapshot_state(
@@ -86,6 +33,16 @@ fn dwelling_snapshot_state(
         station,
         remaining_seconds: dwell_seconds - elapsed_seconds,
     }
+}
+
+fn commit_departure(train: &mut Train, candidate: DepartureCandidate) {
+    train.direction = candidate.direction;
+    train.velocity = 1;
+    train.state = TrainState::Moving {
+        from: candidate.from,
+        to: candidate.to,
+        elapsed_seconds: 0,
+    };
 }
 
 impl Simulation {

@@ -1,4 +1,5 @@
 pub mod command;
+mod domain;
 pub mod dwell;
 pub mod network;
 pub mod resource;
