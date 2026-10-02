@@ -112,6 +112,22 @@ mod tests {
     use crate::simulation::Simulation;
 
     #[test]
+    fn train_uses_requested_initial_dwell() {
+        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward, 7);
+
+        assert_eq!(
+            train.state,
+            TrainState::AtStation {
+                station: StationId(0),
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 0,
+                    dwell_seconds: 7,
+                },
+            }
+        );
+    }
+
+    #[test]
     fn train_starts_at_station() {
         let station = StationId(0);
 
