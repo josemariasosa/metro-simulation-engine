@@ -65,7 +65,7 @@ fn assert_world(sim: &Simulation, time: u64, trains: &[Train]) {
         assert_eq!(actual.capacity, expected.capacity);
         assert_eq!(actual.control, expected.control);
         assert_eq!(actual.direction, expected.direction);
-        assert_eq!(actual.velocity, expected.velocity);
+        assert_eq!(actual.velocity(), expected.velocity());
         assert_eq!(actual.state, expected.state);
     }
 }
@@ -103,7 +103,7 @@ fn moving(sim: &Simulation, id: usize, from: usize, to: usize, elapsed: u64) {
         }
     );
     assert_eq!(train(sim, id).direction, if to > from { F } else { B });
-    assert_eq!(train(sim, id).velocity, 1);
+    assert_eq!(train(sim, id).velocity(), 1);
 }
 
 fn ready(sim: &Simulation, id: usize, station: usize, direction: Direction) {
@@ -115,7 +115,7 @@ fn ready(sim: &Simulation, id: usize, station: usize, direction: Direction) {
         }
     );
     assert_eq!(train(sim, id).direction, direction);
-    assert_eq!(train(sim, id).velocity, 0);
+    assert_eq!(train(sim, id).velocity(), 0);
 }
 
 fn arrived(sim: &Simulation, id: usize, station: usize, direction: Direction) {
@@ -131,7 +131,7 @@ fn arrived(sim: &Simulation, id: usize, station: usize, direction: Direction) {
         }
     );
     assert_eq!(t.direction, direction);
-    assert_eq!(t.velocity, 0);
+    assert_eq!(t.velocity(), 0);
 }
 
 #[test]

@@ -161,7 +161,7 @@ mod tests {
             assert_eq!(simulation.elapsed_seconds, 0);
             let train = &simulation.trains()[0];
             assert_eq!(train.direction, direction);
-            assert_eq!(train.velocity, 1);
+            assert_eq!(train.velocity(), 1);
             assert_eq!(
                 train.state,
                 TrainState::Moving {

@@ -14,7 +14,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
         assert!(ids.insert(train.id), "duplicate TrainId");
         match train.state {
             TrainState::AtStation { station, .. } => {
-                assert_eq!(train.velocity, 0);
+                assert_eq!(train.velocity(), 0);
                 occupants.push((station, train.direction, train.id));
             }
             TrainState::Moving {
@@ -22,7 +22,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
                 to,
                 elapsed_seconds,
             } => {
-                assert_eq!(train.velocity, 1);
+                assert_eq!(train.velocity(), 1);
                 match train.direction {
                     Direction::Forward => assert_eq!(to.0, from.0 + 1),
                     Direction::Backward => assert_eq!(from.0, to.0 + 1),
@@ -85,11 +85,6 @@ pub fn moving_train(id: usize, from: StationId, to: StationId, direction: Direct
         direction,
         DwellPolicy::default_dwell_seconds(),
     );
-    train.state = TrainState::Moving {
-        from,
-        to,
-        elapsed_seconds: 0,
-    };
-    train.velocity = 1;
+    train.set_moving_for_test(from, to, 0);
     train
 }

@@ -53,7 +53,7 @@ pub struct Train {
     pub state: TrainState,
     pub direction: Direction,
     pub(crate) control: TrainControl,
-    pub(crate) velocity: u8,
+    velocity: u8,
 }
 
 impl Train {
@@ -103,6 +103,10 @@ impl Train {
         }
     }
 
+    pub(crate) fn velocity(&self) -> u8 {
+        self.velocity
+    }
+
     pub(crate) fn apply_departure(&mut self, candidate: DepartureCandidate) {
         self.direction = candidate.direction;
         self.velocity = 1;
@@ -111,6 +115,14 @@ impl Train {
             to: candidate.to,
             elapsed_seconds: 0,
         };
+    }
+
+    pub(crate) fn reject_departure(&mut self, station: StationId) {
+        self.state = TrainState::AtStation {
+            station,
+            state: AtStationState::Ready,
+        };
+        self.velocity = 0;
     }
 
     pub(crate) fn arrive_at(&mut self, station: StationId, dwell_seconds: u64) {
@@ -162,6 +174,23 @@ impl Train {
 
     pub(crate) fn is_manual_control(&self) -> bool {
         self.control == TrainControl::Manual
+    }
+}
+
+#[cfg(test)]
+impl Train {
+    pub(crate) fn set_moving_for_test(
+        &mut self,
+        from: StationId,
+        to: StationId,
+        elapsed_seconds: u64,
+    ) {
+        self.velocity = 1;
+        self.state = TrainState::Moving {
+            from,
+            to,
+            elapsed_seconds,
+        };
     }
 }
 
