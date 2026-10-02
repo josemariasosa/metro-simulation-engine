@@ -258,3 +258,35 @@ fn lower_id_proposal_cannot_displace_existing_destination_owner() {
         }
     }
 }
+
+#[test]
+fn blocked_automatic_current_direction_never_falls_back_to_available_reverse_track() {
+    let (network, [a, b, c, d]) = line(["A", "B", "C", "D"]);
+    let mut sim = Simulation::new(
+        network,
+        vec![
+            Train::new(TrainId(1), 100, b, Direction::Forward),
+            Train::new_manual(TrainId(2), 100, c, Direction::Forward),
+        ],
+        DwellPolicy::new(),
+    );
+    // B -> A exists and A/Backward is empty throughout the blocked retries.
+    assert!(sim.network.track(b, a).is_some());
+    for time in 1..=5 {
+        sim.step();
+        assert_eq!(sim.elapsed_seconds, time);
+        if time >= 3 {
+            assert_eq!(by_id(&sim)[&1], ready(1, b, Direction::Forward));
+            assert_eq!(by_id(&sim)[&2], ready(2, c, Direction::Forward));
+        }
+    }
+
+    sim.apply_command(TrainCommand::Accelerate {
+        train_id: TrainId(2),
+    })
+    .unwrap();
+    assert_eq!(by_id(&sim)[&2], moving(2, c, d, Direction::Forward, 0));
+    sim.step();
+    assert_eq!(sim.elapsed_seconds, 6);
+    assert_eq!(by_id(&sim)[&1], moving(1, b, c, Direction::Forward, 0));
+}

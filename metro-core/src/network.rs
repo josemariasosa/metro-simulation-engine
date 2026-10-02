@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::station::{Station, StationId};
-use crate::track::Track;
+pub use crate::track::Track;
 use crate::train::Direction;
 
 #[derive(Debug, Default)]
