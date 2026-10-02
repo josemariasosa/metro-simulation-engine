@@ -42,7 +42,7 @@ impl ResourceView {
     pub(crate) fn derive(trains: &[Train]) -> Self {
         let mut view = Self::default();
         for train in trains {
-            match train.state {
+            match train.state() {
                 TrainState::AtStation { station, .. } => {
                     let slot = StationSlot {
                         station,
@@ -163,7 +163,7 @@ mod tests {
             assert_eq!(train.direction(), direction);
             assert_eq!(train.velocity(), 1);
             assert_eq!(
-                train.state,
+                train.state(),
                 TrainState::Moving {
                     from,
                     to,
@@ -326,10 +326,18 @@ mod tests {
                 Direction::Forward,
                 DwellPolicy::default_dwell_seconds(),
             );
-            forward.state = TrainState::AtStation {
-                station: StationId(1),
-                state,
-            };
+            match state {
+                AtStationState::Ready => {
+                    forward.set_ready_for_test(StationId(1));
+                }
+                AtStationState::Dwelling {
+                    elapsed_seconds: _,
+                    dwell_seconds,
+                } => {
+                    forward.set_dwell_for_test(StationId(1), dwell_seconds);
+                }
+            }
+
             let mut backward = forward.clone();
             backward.id = TrainId(2);
             backward.set_direction_for_test(Direction::Backward);

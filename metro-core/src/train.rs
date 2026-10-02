@@ -50,7 +50,7 @@ pub enum AtStationState {
 pub struct Train {
     pub id: TrainId,
     pub capacity: usize,
-    pub state: TrainState,
+    state: TrainState,
     direction: Direction,
     control: TrainControl,
     velocity: u8,
@@ -109,6 +109,10 @@ impl Train {
 
     pub fn direction(&self) -> Direction {
         self.direction
+    }
+
+    pub fn state(&self) -> TrainState {
+        self.state
     }
 
     pub(crate) fn apply_departure(&mut self, candidate: DepartureCandidate) {
@@ -198,6 +202,23 @@ impl Train {
             from,
             to,
             elapsed_seconds,
+        };
+    }
+
+    pub(crate) fn set_ready_for_test(&mut self, station: StationId) {
+        self.state = TrainState::AtStation {
+            station,
+            state: AtStationState::Ready,
+        };
+    }
+
+    pub(crate) fn set_dwell_for_test(&mut self, station: StationId, dwell_seconds: u64) {
+        self.state = TrainState::AtStation {
+            station,
+            state: AtStationState::Dwelling {
+                elapsed_seconds: 0,
+                dwell_seconds,
+            },
         };
     }
 

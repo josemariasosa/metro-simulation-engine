@@ -78,10 +78,10 @@ fn trains_start_at_opposite_endpoints_in_opposite_directions() {
     assert_eq!(simulation.trains()[1].id, TrainId(1));
 
     assert_eq!(simulation.trains()[0].direction(), Direction::Forward);
-    assert_train_dwelling_at(&simulation.trains()[0].state, &a);
+    assert_train_dwelling_at(&simulation.trains()[0].state(), &a);
 
     assert_eq!(simulation.trains()[1].direction(), Direction::Backward);
-    assert_train_dwelling_at(&simulation.trains()[1].state, &e);
+    assert_train_dwelling_at(&simulation.trains()[1].state(), &e);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn both_trains_depart_after_dwell() {
 
     // assert that both trains have departed from their starting stations
     assert_eq!(
-        simulation.trains()[0].state,
+        simulation.trains()[0].state(),
         TrainState::AtStation {
             station: a,
             state: AtStationState::Dwelling {
@@ -110,7 +110,7 @@ fn both_trains_depart_after_dwell() {
         }
     );
     assert_eq!(
-        simulation.trains()[1].state,
+        simulation.trains()[1].state(),
         TrainState::AtStation {
             station: e,
             state: AtStationState::Dwelling {
@@ -123,7 +123,7 @@ fn both_trains_depart_after_dwell() {
     simulation.step(); // advance the simulation by one step
 
     assert_eq!(
-        simulation.trains()[0].state,
+        simulation.trains()[0].state(),
         TrainState::AtStation {
             station: a,
             state: AtStationState::Dwelling {
@@ -133,7 +133,7 @@ fn both_trains_depart_after_dwell() {
         }
     );
     assert_eq!(
-        simulation.trains()[1].state,
+        simulation.trains()[1].state(),
         TrainState::AtStation {
             station: e,
             state: AtStationState::Dwelling {
@@ -146,7 +146,7 @@ fn both_trains_depart_after_dwell() {
     simulation.step(); // advance the simulation by one step
 
     assert_eq!(
-        simulation.trains()[0].state,
+        simulation.trains()[0].state(),
         TrainState::Moving {
             from: a,
             to: b,
@@ -154,7 +154,7 @@ fn both_trains_depart_after_dwell() {
         }
     );
     assert_eq!(
-        simulation.trains()[1].state,
+        simulation.trains()[1].state(),
         TrainState::Moving {
             from: e,
             to: d,
@@ -198,7 +198,7 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         assert_eq!(train.velocity, 0);
     }
     assert_eq!(
-        simulation.trains()[0].state,
+        simulation.trains()[0].state(),
         TrainState::AtStation {
             station: e,
             state: AtStationState::Dwelling {
@@ -208,7 +208,7 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         }
     );
     assert_eq!(
-        simulation.trains()[1].state,
+        simulation.trains()[1].state(),
         TrainState::AtStation {
             station: a,
             state: AtStationState::Dwelling {
@@ -233,7 +233,7 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         assert_eq!(train.velocity, 1);
     }
     assert_eq!(
-        simulation.trains()[0].state,
+        simulation.trains()[0].state(),
         TrainState::Moving {
             from: e,
             to: d,
@@ -241,7 +241,7 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         }
     );
     assert_eq!(
-        simulation.trains()[1].state,
+        simulation.trains()[1].state(),
         TrainState::Moving {
             from: a,
             to: b,
@@ -257,7 +257,7 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         assert_eq!(train.velocity, 1);
     }
     assert_eq!(
-        simulation.trains()[0].state,
+        simulation.trains()[0].state(),
         TrainState::Moving {
             from: e,
             to: d,
@@ -265,7 +265,7 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
         }
     );
     assert_eq!(
-        simulation.trains()[1].state,
+        simulation.trains()[1].state(),
         TrainState::Moving {
             from: a,
             to: b,

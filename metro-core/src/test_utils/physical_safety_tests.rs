@@ -70,7 +70,7 @@ fn assert_world(sim: &Simulation, time: u64, trains: &[Train]) {
         );
         assert_eq!(actual.direction(), expected.direction());
         assert_eq!(actual.velocity(), expected.velocity());
-        assert_eq!(actual.state, expected.state);
+        assert_eq!(actual.state(), expected.state());
     }
 }
 
@@ -79,7 +79,7 @@ fn command(sim: &mut Simulation, id: usize, expected: Result<(), CommandError>) 
     let before = sim.trains().to_vec();
     let already_moving = before
         .iter()
-        .any(|t| t.id == TrainId(id) && matches!(t.state, TrainState::Moving { .. }));
+        .any(|t| t.id == TrainId(id) && matches!(t.state(), TrainState::Moving { .. }));
     assert_eq!(
         sim.apply_command(TrainCommand::Accelerate {
             train_id: TrainId(id)
@@ -99,7 +99,7 @@ fn train(sim: &Simulation, id: usize) -> &Train {
 
 fn moving(sim: &Simulation, id: usize, from: usize, to: usize, elapsed: u64) {
     assert_eq!(
-        train(sim, id).state,
+        train(sim, id).state(),
         TrainState::Moving {
             from: StationId(from),
             to: StationId(to),
@@ -112,7 +112,7 @@ fn moving(sim: &Simulation, id: usize, from: usize, to: usize, elapsed: u64) {
 
 fn ready(sim: &Simulation, id: usize, station: usize, direction: Direction) {
     assert_eq!(
-        train(sim, id).state,
+        train(sim, id).state(),
         TrainState::AtStation {
             station: StationId(station),
             state: AtStationState::Ready,
@@ -125,7 +125,7 @@ fn ready(sim: &Simulation, id: usize, station: usize, direction: Direction) {
 fn arrived(sim: &Simulation, id: usize, station: usize, direction: Direction) {
     let t = train(sim, id);
     assert_eq!(
-        t.state,
+        t.state(),
         TrainState::AtStation {
             station: StationId(station),
             state: AtStationState::Dwelling {

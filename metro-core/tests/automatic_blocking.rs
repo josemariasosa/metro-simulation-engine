@@ -137,7 +137,7 @@ fn conga_freezes_starting_ownership_in_both_storage_orders() {
             .find(|train| train.id == TrainId(3))
             .unwrap();
         assert_eq!(
-            t3.state,
+            t3.state(),
             TrainState::AtStation {
                 station: d,
                 state: AtStationState::Dwelling {

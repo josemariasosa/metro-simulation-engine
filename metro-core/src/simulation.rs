@@ -65,7 +65,7 @@ impl Simulation {
                     return Err(CommandError::NotManual);
                 }
 
-                let station = match train.state {
+                let station = match train.state() {
                     TrainState::Moving { .. } => return Ok(()),
                     TrainState::AtStation { station, .. } => station,
                 };
@@ -99,7 +99,7 @@ impl Simulation {
             id: train.id,
             direction: train.direction(),
             velocity: train.velocity(),
-            state: self.snapshot_train_state(&train.state),
+            state: self.snapshot_train_state(&train.state()),
         }
     }
 
@@ -177,7 +177,7 @@ impl Simulation {
             if !train.is_automatic_control() {
                 continue;
             }
-            let TrainState::AtStation { station, state } = train.state else {
+            let TrainState::AtStation { station, state } = train.state() else {
                 continue;
             };
             let eligible = match state {
@@ -241,7 +241,7 @@ impl Simulation {
                 }
                 AutomaticDepartureDecision::NotEligible => {}
             }
-            match train.state {
+            match train.state() {
                 TrainState::AtStation { station, state } => {
                     Self::step_at_station(train, station, state);
                 }
@@ -295,7 +295,7 @@ mod tests {
                 actual.is_automatic_control(),
                 expected.is_automatic_control()
             );
-            assert_eq!(actual.state, expected.state);
+            assert_eq!(actual.state(), expected.state());
             assert_eq!(actual.direction(), expected.direction());
             assert_eq!(actual.velocity(), expected.velocity());
         }
@@ -317,11 +317,7 @@ mod tests {
             DwellPolicy::default_dwell_seconds(),
         );
         let mut blocker = moving_train(2, a, b, Direction::Forward);
-        blocker.state = TrainState::Moving {
-            from: a,
-            to: b,
-            elapsed_seconds: 4,
-        };
+        blocker.set_moving_for_test(a, b, 4);
         let mut simulation = Simulation::new(network, vec![train, blocker], dwell_policy);
         let resources = ResourceView::derive(simulation.trains());
         assert!(!resources.track_available(a, b));
@@ -361,7 +357,7 @@ mod tests {
             }
         }
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: a,
                 state: AtStationState::Ready,
@@ -402,7 +398,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            simulation.trains()[1].state,
+            simulation.trains()[1].state(),
             TrainState::Moving {
                 from: b,
                 to: a,
@@ -412,7 +408,7 @@ mod tests {
         simulation.step();
         assert_eq!(simulation.trains()[0].direction(), Direction::Forward);
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: c,
                 state: AtStationState::Dwelling {
@@ -430,7 +426,7 @@ mod tests {
         assert_eq!(simulation.trains()[0].direction(), Direction::Backward);
         assert_eq!(simulation.trains()[0].velocity(), 1);
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: c,
                 to: b,
@@ -502,7 +498,7 @@ mod tests {
             assert_eq!(simulation.elapsed_seconds, before.elapsed_seconds);
             assert_eq!(simulation.snapshot().trains[1], before.trains[1]);
             assert_eq!(
-                simulation.trains()[0].state,
+                simulation.trains()[0].state(),
                 TrainState::Moving {
                     from: a,
                     to: b,
@@ -771,7 +767,7 @@ mod tests {
         let mut simulation = Simulation::new(network, vec![train.clone()], dwell_policy.clone());
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: station_a,
                 state: AtStationState::Dwelling {
@@ -784,7 +780,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: station_a,
                 state: AtStationState::Dwelling {
@@ -816,7 +812,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: station_a,
                 state: AtStationState::Dwelling {
@@ -829,7 +825,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: station_a,
                 to: station_b,
@@ -853,7 +849,7 @@ mod tests {
             DwellPolicy::default_dwell_seconds(),
         );
         let before = train.clone();
-        let TrainState::AtStation { station, .. } = train.state else {
+        let TrainState::AtStation { station, .. } = train.state() else {
             panic!("expected station state");
         };
         let candidate = select_departure_candidate(&network, station, train.direction()).unwrap();
@@ -865,7 +861,7 @@ mod tests {
         assert_eq!(train.capacity, before.capacity);
         assert_eq!(train.is_manual_control(), before.is_manual_control());
         assert_eq!(train.is_automatic_control(), before.is_automatic_control());
-        assert_eq!(train.state, before.state);
+        assert_eq!(train.state(), before.state());
         assert_eq!(train.direction(), before.direction());
         assert_eq!(train.velocity(), before.velocity());
 
@@ -878,7 +874,7 @@ mod tests {
         assert_eq!(train.direction(), Direction::Backward);
         assert_eq!(train.velocity(), 1);
         assert_eq!(
-            train.state,
+            train.state(),
             TrainState::Moving {
                 from: c,
                 to: b,
@@ -919,7 +915,7 @@ mod tests {
                 assert_eq!(train.direction(), direction);
                 assert_eq!(train.velocity(), 0);
                 assert_eq!(
-                    train.state,
+                    train.state(),
                     TrainState::AtStation {
                         station: StationId(station),
                         state: AtStationState::Dwelling {
@@ -936,7 +932,7 @@ mod tests {
             assert_eq!(train.direction(), selected_direction);
             assert_eq!(train.velocity(), 1);
             assert_eq!(
-                train.state,
+                train.state(),
                 TrainState::Moving {
                     from: StationId(station),
                     to: StationId(to),
@@ -978,15 +974,12 @@ mod tests {
             Direction::Forward,
             DwellPolicy::default_dwell_seconds(),
         );
-        train.state = TrainState::AtStation {
-            station: a,
-            state: AtStationState::Ready,
-        };
+        train.set_ready_for_test(a);
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
         simulation.step();
         assert_eq!(simulation.elapsed_seconds, 1);
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: a,
                 to: b,
@@ -1019,7 +1012,7 @@ mod tests {
         for elapsed_seconds in 0..3 {
             let train = &simulation.trains()[0];
             assert_eq!(
-                (train.state, train.velocity()),
+                (train.state(), train.velocity()),
                 (
                     TrainState::AtStation {
                         station: station_a,
@@ -1037,7 +1030,7 @@ mod tests {
         // Departure sets velocity before any track traversal time is consumed.
         let train = &simulation.trains()[0];
         assert_eq!(
-            (train.state, train.velocity()),
+            (train.state(), train.velocity()),
             (
                 TrainState::Moving {
                     from: station_a,
@@ -1064,13 +1057,7 @@ mod tests {
             Direction::Forward,
             DwellPolicy::default_dwell_seconds(),
         );
-        train.state = TrainState::AtStation {
-            station: a,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 0,
-                dwell_seconds: 5,
-            },
-        };
+        train.set_dwell_for_test(a, 5);
 
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
@@ -1080,7 +1067,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: a,
                 state: AtStationState::Dwelling {
@@ -1093,7 +1080,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: a,
                 to: b,
@@ -1125,7 +1112,7 @@ mod tests {
 
         assert_eq!(simulation.trains()[0].velocity(), 1);
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: station_a,
                 to: station_b,
@@ -1156,7 +1143,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: a,
                 to: b,
@@ -1189,7 +1176,7 @@ mod tests {
         let train = &simulation.trains()[0];
         assert_eq!(train.velocity(), 0);
         assert_eq!(
-            train.state,
+            train.state(),
             TrainState::AtStation {
                 station: b,
                 state: AtStationState::Dwelling {
@@ -1223,7 +1210,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: a,
                 to: b,
@@ -1236,7 +1223,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: a,
                 to: b,
@@ -1269,7 +1256,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: a,
                 to: b,
@@ -1283,7 +1270,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: b,
                 state: AtStationState::Dwelling {
@@ -1324,7 +1311,7 @@ mod tests {
         assert_eq!(simulation.trains()[0].velocity(), 1);
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: c,
                 to: b,
@@ -1359,7 +1346,7 @@ mod tests {
         assert_eq!(simulation.trains()[0].direction(), Direction::Backward);
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: c,
                 to: b,
@@ -1372,7 +1359,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::AtStation {
                 station: b,
                 state: AtStationState::Dwelling {
@@ -1390,7 +1377,7 @@ mod tests {
         assert_eq!(simulation.trains()[0].direction(), Direction::Backward);
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving {
                 from: b,
                 to: a,
@@ -1411,7 +1398,7 @@ mod tests {
                     elapsed_seconds,
                     dwell_seconds,
                 },
-        } = train.state
+        } = train.state()
         else {
             panic!("expected train to start dwelling");
         };
@@ -1440,7 +1427,7 @@ mod tests {
                     elapsed_seconds,
                     dwell_seconds,
                 },
-        } = train.state
+        } = train.state()
         else {
             panic!("expected train to start dwelling");
         };
@@ -1463,7 +1450,7 @@ mod tests {
                     elapsed_seconds,
                     dwell_seconds,
                 },
-        } = train.state
+        } = train.state()
         else {
             panic!("expected train to still be dwelling");
         };
@@ -1486,7 +1473,7 @@ mod tests {
                     elapsed_seconds,
                     dwell_seconds,
                 },
-        } = train.state
+        } = train.state()
         else {
             panic!("expected train to still be dwelling");
         };
@@ -1502,7 +1489,7 @@ mod tests {
         simulation.step();
 
         assert!(matches!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].state(),
             TrainState::Moving { .. }
         ));
     }

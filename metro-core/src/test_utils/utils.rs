@@ -12,7 +12,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
     let mut tracks = Vec::new();
     for train in sim.trains() {
         assert!(ids.insert(train.id), "duplicate TrainId");
-        match train.state {
+        match train.state() {
             TrainState::AtStation { station, .. } => {
                 assert_eq!(train.velocity(), 0);
                 occupants.push((station, train.direction(), train.id));
