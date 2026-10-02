@@ -37,7 +37,7 @@ pub(super) fn initialize_scenario(app: &mut App) {
     network.connect_bidirectional(c, d, 3);
 
     let player_id = TrainId(0);
-    let train = Train::new_manual(player_id, 100, a, Direction::Forward);
+    let train = Train::new_manual(player_id, 100, a, Direction::Forward, 3);
     let simulation = Simulation::new(network, vec![train], DwellPolicy::new());
     let snapshot = simulation.snapshot();
 

@@ -10,7 +10,7 @@ fn test_simulation(travel_seconds: u64) -> Simulation {
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, travel_seconds);
-    let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+    let train = Train::new(TrainId(0), 100, a, Direction::Forward, 3);
     Simulation::new(network, vec![train], DwellPolicy::new())
 }
 
@@ -122,7 +122,7 @@ fn snapshot_represents_ready_manual_train() {
     let station_a = network.add_station("A");
     let station_b = network.add_station("B");
     network.connect_bidirectional(station_a, station_b, 6);
-    let train = Train::new_manual(TrainId(0), 100, station_a, Direction::Forward);
+    let train = Train::new_manual(TrainId(0), 100, station_a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
 
     for _ in 0..3 {
@@ -246,8 +246,8 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
     network.add_track(a, b, 6);
     network.add_track(b, a, 4);
     let trains = vec![
-        Train::new(TrainId(9), 100, b, Direction::Backward),
-        Train::new(TrainId(2), 100, a, Direction::Forward),
+        Train::new(TrainId(9), 100, b, Direction::Backward, 3),
+        Train::new(TrainId(2), 100, a, Direction::Forward, 3),
     ];
     let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
     for _ in 0..3 {

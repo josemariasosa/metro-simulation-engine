@@ -116,8 +116,9 @@ pub(crate) fn assert_claims(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dwell::DwellPolicy;
     use crate::network::Network;
-    use crate::test_utils::moving_train;
+    use crate::test_utils::utils::moving_train;
     use crate::train::AtStationState;
 
     #[test]
@@ -128,7 +129,13 @@ mod tests {
         assert!(empty.track_available(a, b));
         assert!(empty.station_slot_available(b, Direction::Forward));
 
-        let occupied = ResourceView::derive(&[Train::new(TrainId(1), 100, b, Direction::Forward)]);
+        let occupied = ResourceView::derive(&[Train::new(
+            TrainId(1),
+            100,
+            b,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        )]);
         assert!(occupied.track_available(a, b));
         assert!(!occupied.station_slot_available(b, Direction::Forward));
         assert!(occupied.station_slot_available(b, Direction::Backward));
@@ -157,9 +164,21 @@ mod tests {
             } else {
                 (a, b, Direction::Forward)
             };
-            let train = Train::new_manual(TrainId(1), 100, from, Direction::Forward);
+            let train = Train::new_manual(
+                TrainId(1),
+                100,
+                from,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            );
             // A reversal must not require the opposite source slot to be free.
-            let other = Train::new_manual(TrainId(2), 100, from, Direction::Backward);
+            let other = Train::new_manual(
+                TrainId(2),
+                100,
+                from,
+                Direction::Backward,
+                DwellPolicy::default_dwell_seconds(),
+            );
             let mut simulation = Simulation::new(network, vec![train, other], DwellPolicy::new());
             let before = ResourceView::derive(simulation.trains());
             let source = StationSlot {
@@ -225,8 +244,20 @@ mod tests {
         network.connect_bidirectional(b, c, 2);
 
         let trains = vec![
-            Train::new(TrainId(1), 100, b, Direction::Forward),
-            Train::new(TrainId(2), 100, b, Direction::Backward),
+            Train::new(
+                TrainId(1),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+            Train::new(
+                TrainId(2),
+                100,
+                b,
+                Direction::Backward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         let forward_slot = StationSlot {
             station: b,
@@ -253,7 +284,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "station slot already occupied")]
     fn resource_view_rejects_duplicate_station_occupants() {
-        let train = Train::new(TrainId(1), 100, StationId(0), Direction::Forward);
+        let train = Train::new(
+            TrainId(1),
+            100,
+            StationId(0),
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let mut other = train.clone();
         other.id = TrainId(2);
         ResourceView::derive(&[train, other]);
@@ -283,7 +320,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "station slot occupied and reserved")]
     fn resource_view_rejects_reserving_occupied_slot() {
-        let stopped = Train::new(TrainId(1), 100, StationId(1), Direction::Forward);
+        let stopped = Train::new(
+            TrainId(1),
+            100,
+            StationId(1),
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let moving = moving_train(2, StationId(0), StationId(1), Direction::Forward);
         ResourceView::derive(&[stopped, moving]);
     }
@@ -291,7 +334,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "station slot occupied and reserved")]
     fn resource_view_rejects_occupying_reserved_slot() {
-        let stopped = Train::new(TrainId(1), 100, StationId(1), Direction::Forward);
+        let stopped = Train::new(
+            TrainId(1),
+            100,
+            StationId(1),
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let moving = moving_train(2, StationId(0), StationId(1), Direction::Forward);
         ResourceView::derive(&[moving, stopped]);
     }
@@ -305,7 +354,13 @@ mod tests {
                 dwell_seconds: 3,
             },
         ] {
-            let mut forward = Train::new(TrainId(1), 100, StationId(1), Direction::Forward);
+            let mut forward = Train::new(
+                TrainId(1),
+                100,
+                StationId(1),
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            );
             forward.state = TrainState::AtStation {
                 station: StationId(1),
                 state,

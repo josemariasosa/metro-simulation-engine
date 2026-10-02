@@ -10,6 +10,15 @@ impl DwellPolicy {
     }
 
     pub fn dwell_seconds(&self, _station: StationId, _train: &Train) -> u64 {
-        3
+        dwell_seconds_internal()
     }
+
+    #[cfg(test)]
+    pub fn default_dwell_seconds() -> u64 {
+        dwell_seconds_internal()
+    }
+}
+
+fn dwell_seconds_internal() -> u64 {
+    3
 }

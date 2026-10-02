@@ -57,7 +57,13 @@ pub struct Train {
 }
 
 impl Train {
-    pub fn new(id: TrainId, capacity: usize, station: StationId, direction: Direction) -> Self {
+    pub fn new(
+        id: TrainId,
+        capacity: usize,
+        station: StationId,
+        direction: Direction,
+        initial_dwell_seconds: u64,
+    ) -> Self {
         Self {
             id,
             capacity,
@@ -65,7 +71,7 @@ impl Train {
                 station,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3,
+                    dwell_seconds: initial_dwell_seconds,
                 },
             },
             direction,
@@ -79,6 +85,7 @@ impl Train {
         capacity: usize,
         station: StationId,
         direction: Direction,
+        initial_dwell_seconds: u64,
     ) -> Self {
         Self {
             id,
@@ -87,7 +94,7 @@ impl Train {
                 station,
                 state: AtStationState::Dwelling {
                     elapsed_seconds: 0,
-                    dwell_seconds: 3,
+                    dwell_seconds: initial_dwell_seconds,
                 },
             },
             direction,
@@ -108,7 +115,13 @@ mod tests {
     fn train_starts_at_station() {
         let station = StationId(0);
 
-        let train = Train::new(TrainId(0), 100, station, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            station,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         assert_eq!(
             train.state,
@@ -139,7 +152,13 @@ mod tests {
 
         network.connect_bidirectional(station_a, station_b, 60);
 
-        let mut train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        let mut train = Train::new(
+            TrainId(0),
+            100,
+            station_a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         train.state = TrainState::Moving {
             from: station_a,
@@ -166,7 +185,13 @@ mod tests {
     fn new_train_starts_dwelling_at_station() {
         let station = StationId(0);
 
-        let train = Train::new(TrainId(0), 100, station, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            station,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         assert_eq!(
             train.state,
@@ -182,14 +207,26 @@ mod tests {
 
     #[test]
     fn new_train_is_automatic() {
-        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            StationId(0),
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         assert_eq!(train.control, TrainControl::Automatic);
     }
 
     #[test]
     fn new_train_starts_stopped() {
-        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            StationId(0),
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         assert_eq!(train.velocity, 0);
     }
@@ -198,7 +235,13 @@ mod tests {
     fn new_manual_train_is_manual_and_starts_stopped() {
         let station = StationId(0);
 
-        let train = Train::new_manual(TrainId(0), 100, station, Direction::Forward);
+        let train = Train::new_manual(
+            TrainId(0),
+            100,
+            station,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         assert_eq!(train.control, TrainControl::Manual);
         assert_eq!(train.velocity, 0);

@@ -10,6 +10,3 @@ pub mod train;
 
 #[cfg(test)]
 pub mod test_utils;
-
-#[cfg(test)]
-mod physical_safety_tests;

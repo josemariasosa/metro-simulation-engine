@@ -15,7 +15,7 @@ fn manual_a_b_simulation_with_travel_seconds(travel_seconds: u64) -> Simulation 
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, travel_seconds);
-    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward);
+    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward, 3);
     Simulation::new(network, vec![train], DwellPolicy::new())
 }
 
@@ -235,8 +235,8 @@ fn accelerate_while_manual_train_is_moving_is_idempotent() {
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, 10);
-    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward);
-    let other_train = Train::new_manual(TrainId(1), 100, b, Direction::Backward);
+    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward, 3);
+    let other_train = Train::new_manual(TrainId(1), 100, b, Direction::Backward, 3);
     let mut simulation = Simulation::new(network, vec![train, other_train], DwellPolicy::new());
 
     simulation
@@ -274,7 +274,7 @@ fn accelerate_while_manual_train_is_moving_is_idempotent() {
 fn manual_train_becomes_ready_after_dwell_completes() {
     let mut network = Network::new();
     let station_a = network.add_station("A");
-    let train = Train::new_manual(TrainId(0), 100, station_a, Direction::Forward);
+    let train = Train::new_manual(TrainId(0), 100, station_a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
 
     for elapsed_seconds in 0..3 {
@@ -310,7 +310,7 @@ fn manual_train_remains_ready_without_input() {
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, 10);
-    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward);
+    let train = Train::new_manual(TrainId(0), 100, a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
 
     simulation.step();
@@ -345,7 +345,7 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, 10);
-    let train = Train::new_manual(TrainId(0), 100, b, Direction::Forward);
+    let train = Train::new_manual(TrainId(0), 100, b, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
 
     for _ in 0..3 {
@@ -408,8 +408,8 @@ fn blocked_manual_intent_is_not_buffered_when_destination_becomes_available() {
     network.connect_bidirectional(a, b, 2);
     network.connect_bidirectional(b, c, 2);
     let trains = vec![
-        Train::new_manual(TrainId(1), 100, a, Direction::Forward),
-        Train::new_manual(TrainId(2), 100, b, Direction::Forward),
+        Train::new_manual(TrainId(1), 100, a, Direction::Forward, 3),
+        Train::new_manual(TrainId(2), 100, b, Direction::Forward, 3),
     ];
     let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
     assert_command_unchanged(&mut simulation, TrainId(1), Err(CommandError::Blocked));
@@ -478,9 +478,9 @@ fn command_rejections_preserve_all_trains_and_timers() {
     let unrelated = network.add_station("Unrelated");
     network.connect_bidirectional(a, b, 10);
     let trains = vec![
-        Train::new(TrainId(10), 100, a, Direction::Forward),
-        Train::new_manual(TrainId(20), 100, isolated, Direction::Forward),
-        Train::new_manual(TrainId(30), 100, unrelated, Direction::Forward),
+        Train::new(TrainId(10), 100, a, Direction::Forward, 3),
+        Train::new_manual(TrainId(20), 100, isolated, Direction::Forward, 3),
+        Train::new_manual(TrainId(30), 100, unrelated, Direction::Forward, 3),
     ];
     let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
     for steps in 0..=3 {
@@ -520,8 +520,8 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, 10);
-    let train = Train::new_manual(TrainId(42), 100, b, Direction::Backward);
-    let other = Train::new(TrainId(7), 200, a, Direction::Forward);
+    let train = Train::new_manual(TrainId(42), 100, b, Direction::Backward, 3);
+    let other = Train::new(TrainId(7), 200, a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![other, train], DwellPolicy::new());
     simulation
         .apply_command(TrainCommand::Accelerate {
@@ -554,7 +554,7 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
 fn non_manual_validation_precedes_departure_selection() {
     let mut network = Network::new();
     let station = network.add_station("Isolated");
-    let train = Train::new(TrainId(42), 100, station, Direction::Forward);
+    let train = Train::new(TrainId(42), 100, station, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
     assert_command_unchanged(&mut simulation, TrainId(42), Err(CommandError::NotManual));
 }
@@ -577,8 +577,8 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
         if !gap {
             network.connect_bidirectional(b, c, 10);
         }
-        let train = Train::new_manual(TrainId(42), 100, StationId(station), direction);
-        let other = Train::new_manual(TrainId(7), 100, a, Direction::Forward);
+        let train = Train::new_manual(TrainId(42), 100, StationId(station), direction, 3);
+        let other = Train::new_manual(TrainId(7), 100, a, Direction::Forward, 3);
         let mut simulation = Simulation::new(network, vec![other, train], DwellPolicy::new());
         simulation.step();
         let before = simulation.snapshot();

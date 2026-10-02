@@ -5,7 +5,7 @@ use crate::network::Network;
 use crate::resource::{ResourceView, assert_claims};
 use crate::simulation::Simulation;
 use crate::station::StationId;
-use crate::test_utils::assert_physical_invariants;
+use crate::test_utils::utils::assert_physical_invariants;
 use crate::train::{AtStationState, Direction, Train, TrainId, TrainState};
 use Direction::{Backward as B, Forward as F};
 
@@ -23,11 +23,23 @@ fn line(n: usize, trains: Vec<Train>) -> Simulation {
 }
 
 fn automatic(id: usize, station: usize, direction: Direction) -> Train {
-    Train::new(TrainId(id), 100, StationId(station), direction)
+    Train::new(
+        TrainId(id),
+        100,
+        StationId(station),
+        direction,
+        DwellPolicy::default_dwell_seconds(),
+    )
 }
 
 fn manual(id: usize, station: usize, direction: Direction) -> Train {
-    Train::new_manual(TrainId(id), 100, StationId(station), direction)
+    Train::new_manual(
+        TrainId(id),
+        100,
+        StationId(station),
+        direction,
+        DwellPolicy::default_dwell_seconds(),
+    )
 }
 
 fn step(sim: &mut Simulation) {

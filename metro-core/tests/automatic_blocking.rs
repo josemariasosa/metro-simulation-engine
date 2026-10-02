@@ -78,9 +78,9 @@ fn conga_freezes_starting_ownership_in_both_storage_orders() {
     for reversed in [false, true] {
         let (network, [a, b, c, d]) = line(["A", "B", "C", "D"]);
         let mut trains = vec![
-            Train::new(TrainId(1), 100, a, Direction::Forward),
-            Train::new(TrainId(2), 100, b, Direction::Forward),
-            Train::new(TrainId(3), 100, c, Direction::Forward),
+            Train::new(TrainId(1), 100, a, Direction::Forward, 3),
+            Train::new(TrainId(2), 100, b, Direction::Forward, 3),
+            Train::new(TrainId(3), 100, c, Direction::Forward, 3),
         ];
         if reversed {
             trains.reverse();
@@ -158,8 +158,8 @@ fn blocked_automatic_retries_without_restarting_dwell() {
         let mut sim = Simulation::new(
             network,
             vec![
-                Train::new(TrainId(1), 100, a, Direction::Forward),
-                Train::new_manual(TrainId(2), 100, b, Direction::Forward),
+                Train::new(TrainId(1), 100, a, Direction::Forward, 3),
+                Train::new_manual(TrainId(2), 100, b, Direction::Forward, 3),
             ],
             DwellPolicy::new(),
         );
@@ -188,8 +188,8 @@ fn blocked_automatic_reversal_commits_direction_only_on_successful_retry() {
     let mut sim = Simulation::new(
         network,
         vec![
-            Train::new(TrainId(1), 100, c, Direction::Forward),
-            Train::new_manual(TrainId(2), 100, b, Direction::Backward),
+            Train::new(TrainId(1), 100, c, Direction::Forward, 3),
+            Train::new_manual(TrainId(2), 100, b, Direction::Backward, 3),
         ],
         DwellPolicy::new(),
     );
@@ -214,8 +214,8 @@ fn terminal_contention_uses_numeric_id_in_both_storage_orders() {
     for reversed in [false, true] {
         let (network, [a, b]) = line(["A", "B"]);
         let mut trains = vec![
-            Train::new(TrainId(2), 100, b, Direction::Forward),
-            Train::new(TrainId(9), 100, b, Direction::Backward),
+            Train::new(TrainId(2), 100, b, Direction::Forward, 3),
+            Train::new(TrainId(9), 100, b, Direction::Backward, 3),
         ];
         if reversed {
             trains.reverse();
@@ -241,8 +241,8 @@ fn lower_id_proposal_cannot_displace_existing_destination_owner() {
     let mut sim = Simulation::new(
         network,
         vec![
-            Train::new(TrainId(1), 100, a, Direction::Forward),
-            Train::new_manual(TrainId(100), 100, b, Direction::Forward),
+            Train::new(TrainId(1), 100, a, Direction::Forward, 3),
+            Train::new_manual(TrainId(100), 100, b, Direction::Forward, 3),
         ],
         DwellPolicy::new(),
     );
@@ -265,8 +265,8 @@ fn blocked_automatic_current_direction_never_falls_back_to_available_reverse_tra
     let mut sim = Simulation::new(
         network,
         vec![
-            Train::new(TrainId(1), 100, b, Direction::Forward),
-            Train::new_manual(TrainId(2), 100, c, Direction::Forward),
+            Train::new(TrainId(1), 100, b, Direction::Forward, 3),
+            Train::new_manual(TrainId(2), 100, c, Direction::Forward, 3),
         ],
         DwellPolicy::new(),
     );

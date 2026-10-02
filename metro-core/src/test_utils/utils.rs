@@ -1,3 +1,4 @@
+use crate::dwell::DwellPolicy;
 use crate::station::StationId;
 use crate::train::{Direction, Train, TrainId, TrainState};
 
@@ -41,7 +42,13 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
 }
 
 pub fn moving_train(id: usize, from: StationId, to: StationId, direction: Direction) -> Train {
-    let mut train = Train::new(TrainId(id), 100, from, direction);
+    let mut train = Train::new(
+        TrainId(id),
+        100,
+        from,
+        direction,
+        DwellPolicy::default_dwell_seconds(),
+    );
     train.state = TrainState::Moving {
         from,
         to,

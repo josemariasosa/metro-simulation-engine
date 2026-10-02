@@ -349,7 +349,7 @@ impl Simulation {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::moving_train;
+    use crate::test_utils::utils::moving_train;
     use crate::train::{Direction, Train, TrainId, TrainState};
 
     use super::*;
@@ -382,7 +382,13 @@ mod tests {
             stations: [a, b],
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 10);
-        let train = Train::new_manual(TrainId(1), 100, a, Direction::Forward);
+        let train = Train::new_manual(
+            TrainId(1),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let mut blocker = moving_train(2, a, b, Direction::Forward);
         blocker.state = TrainState::Moving {
             from: a,
@@ -404,8 +410,20 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 2);
         let trains = vec![
-            Train::new_manual(TrainId(1), 100, a, Direction::Forward),
-            Train::new_manual(TrainId(2), 100, b, Direction::Forward),
+            Train::new_manual(
+                TrainId(1),
+                100,
+                a,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+            Train::new_manual(
+                TrainId(2),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         let mut simulation = Simulation::new(network, trains, dwell_policy);
         for elapsed in 0..=3 {
@@ -432,8 +450,20 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
-            Train::new_manual(TrainId(1), 100, c, Direction::Forward),
-            Train::new_manual(TrainId(2), 100, b, Direction::Backward),
+            Train::new_manual(
+                TrainId(1),
+                100,
+                c,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+            Train::new_manual(
+                TrainId(2),
+                100,
+                b,
+                Direction::Backward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         let mut simulation = Simulation::new(network, trains, dwell_policy);
         simulation.step();
@@ -491,7 +521,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
-            Train::new_manual(TrainId(1), 100, b, Direction::Forward),
+            Train::new_manual(
+                TrainId(1),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
             moving_train(2, b, c, Direction::Forward),
         ];
         let mut simulation = Simulation::new(network, trains, dwell_policy);
@@ -511,9 +547,21 @@ mod tests {
                 stations: [a, b, c],
                 dwell_policy,
             } = SimulationFixture::new(["A", "B", "C"], 2);
-            let train = Train::new_manual(TrainId(1), 100, a, Direction::Forward);
+            let train = Train::new_manual(
+                TrainId(1),
+                100,
+                a,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            );
             let blocker = match blocker_kind {
-                0 => Train::new_manual(TrainId(2), 100, b, Direction::Backward),
+                0 => Train::new_manual(
+                    TrainId(2),
+                    100,
+                    b,
+                    Direction::Backward,
+                    DwellPolicy::default_dwell_seconds(),
+                ),
                 1 => moving_train(2, c, b, Direction::Backward),
                 _ => moving_train(2, b, a, Direction::Backward),
             };
@@ -572,8 +620,20 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
-            Train::new(TrainId(42), 100, a, Direction::Forward),
-            Train::new(TrainId(42), 100, b, Direction::Forward),
+            Train::new(
+                TrainId(42),
+                100,
+                a,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+            Train::new(
+                TrainId(42),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         Simulation::new(network, trains, dwell_policy);
     }
@@ -587,8 +647,20 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
-            Train::new(TrainId(1), 100, b, Direction::Forward),
-            Train::new(TrainId(2), 100, b, Direction::Forward),
+            Train::new(
+                TrainId(1),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+            Train::new(
+                TrainId(2),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         Simulation::new(network, trains, dwell_policy);
     }
@@ -634,7 +706,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
-            Train::new(TrainId(1), 100, b, Direction::Forward),
+            Train::new(
+                TrainId(1),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
             moving_train(2, a, b, Direction::Forward),
         ];
         Simulation::new(network, trains, dwell_policy);
@@ -650,7 +728,13 @@ mod tests {
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
             moving_train(2, a, b, Direction::Forward),
-            Train::new(TrainId(1), 100, b, Direction::Forward),
+            Train::new(
+                TrainId(1),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         Simulation::new(network, trains, dwell_policy);
     }
@@ -663,8 +747,20 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
         let trains = vec![
-            Train::new(TrainId(1), 100, b, Direction::Forward),
-            Train::new(TrainId(2), 100, b, Direction::Backward),
+            Train::new(
+                TrainId(1),
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+            Train::new(
+                TrainId(2),
+                100,
+                b,
+                Direction::Backward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
         ];
         Simulation::new(network, trains, dwell_policy);
     }
@@ -704,7 +800,13 @@ mod tests {
             stations: [a, _],
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 10);
-        let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         Simulation::new(network, vec![train], dwell_policy)
     }
 
@@ -731,7 +833,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 60);
 
-        let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            station_a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
 
         let mut simulation = Simulation::new(network, vec![train.clone()], dwell_policy.clone());
 
@@ -768,7 +876,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 10);
 
-        let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            station_a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let mut simulation = Simulation::new(network, vec![train.clone()], dwell_policy.clone());
 
         simulation.step();
@@ -804,7 +918,13 @@ mod tests {
             stations: [_, b, c],
             ..
         } = SimulationFixture::new(["A", "B", "C"], 10);
-        let mut train = Train::new_manual(TrainId(42), 100, c, Direction::Forward);
+        let mut train = Train::new_manual(
+            TrainId(42),
+            100,
+            c,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let before = train.clone();
         let TrainState::AtStation { station, .. } = train.state else {
             panic!("expected station state");
@@ -855,7 +975,13 @@ mod tests {
             if !gap {
                 network.connect_bidirectional(b, c, 10);
             }
-            let train = Train::new(TrainId(42), 100, StationId(station), direction);
+            let train = Train::new(
+                TrainId(42),
+                100,
+                StationId(station),
+                direction,
+                DwellPolicy::default_dwell_seconds(),
+            );
             let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
 
             for elapsed_seconds in 0..3 {
@@ -896,7 +1022,13 @@ mod tests {
     fn automatic_departure_without_outgoing_track_preserves_panic() {
         let mut network = Network::new();
         let station = network.add_station("Isolated");
-        let train = Train::new(TrainId(0), 100, station, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            station,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
         for _ in 0..3 {
             simulation.step();
@@ -910,7 +1042,13 @@ mod tests {
             stations: [a, b],
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 10);
-        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let mut train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         train.state = TrainState::AtStation {
             station: a,
             state: AtStationState::Ready,
@@ -937,7 +1075,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 60);
 
-        let train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            station_a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         assert_eq!(train.control, crate::train::TrainControl::Automatic);
 
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
@@ -984,7 +1128,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 10);
 
-        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let mut train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         train.state = TrainState::AtStation {
             station: a,
             state: AtStationState::Dwelling {
@@ -1031,7 +1181,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 60);
 
-        let mut train = Train::new(TrainId(0), 100, station_a, Direction::Forward);
+        let mut train = Train::new(
+            TrainId(0),
+            100,
+            station_a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         train.state = TrainState::Moving {
             from: station_a,
             to: station_b,
@@ -1062,7 +1218,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 3);
 
-        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let mut train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         train.state = TrainState::Moving {
             from: a,
             to: b,
@@ -1092,7 +1254,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 1);
 
-        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let mut train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         train.state = TrainState::Moving {
             from: a,
             to: b,
@@ -1126,7 +1294,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 3);
 
-        let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at A for 3 seconds.
@@ -1165,7 +1339,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 3);
 
-        let train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            a,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
@@ -1208,7 +1388,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 10);
 
-        let train = Train::new(TrainId(0), 100, c, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            c,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 
         // Dwell at C for 3 seconds.
@@ -1241,7 +1427,13 @@ mod tests {
             dwell_policy,
         } = SimulationFixture::new(["A", "B", "C"], 2);
 
-        let train = Train::new(TrainId(0), 100, c, Direction::Forward);
+        let train = Train::new(
+            TrainId(0),
+            100,
+            c,
+            Direction::Forward,
+            DwellPolicy::default_dwell_seconds(),
+        );
         let expected_dwell_seconds = dwell_policy.dwell_seconds(b, &train);
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 

@@ -67,8 +67,8 @@ fn trains_start_at_opposite_endpoints_in_opposite_directions() {
     let dwell_policy = DwellPolicy::new();
 
     let trains = vec![
-        Train::new(TrainId(0), 100, a, Direction::Forward),
-        Train::new(TrainId(1), 100, e, Direction::Backward),
+        Train::new(TrainId(0), 100, a, Direction::Forward, 3),
+        Train::new(TrainId(1), 100, e, Direction::Backward, 3),
     ];
 
     let simulation = Simulation::new(network, trains, dwell_policy);
@@ -90,8 +90,8 @@ fn both_trains_depart_after_dwell() {
     let dwell_policy = DwellPolicy::new();
 
     let trains = vec![
-        Train::new(TrainId(0), 100, a, Direction::Forward),
-        Train::new(TrainId(1), 100, e, Direction::Backward),
+        Train::new(TrainId(0), 100, a, Direction::Forward, 3),
+        Train::new(TrainId(1), 100, e, Direction::Backward, 3),
     ];
 
     let mut simulation = Simulation::new(network, trains, dwell_policy);
@@ -182,8 +182,8 @@ fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
     let dwell_policy = DwellPolicy::new();
 
     let trains = vec![
-        Train::new(TrainId(0), 100, a, Direction::Forward),
-        Train::new(TrainId(1), 100, e, Direction::Backward),
+        Train::new(TrainId(0), 100, a, Direction::Forward, 3),
+        Train::new(TrainId(1), 100, e, Direction::Backward, 3),
     ];
 
     let mut simulation = Simulation::new(network, trains, dwell_policy);
