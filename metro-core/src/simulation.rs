@@ -4,8 +4,8 @@ use crate::network::Network;
 use crate::resource::ResourceView;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Direction, Train, TrainControl, TrainId, TrainState};
-use std::collections::{HashMap, HashSet};
+use crate::train::{AtStationState, Direction, Train, TrainControl, TrainState};
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub struct Simulation {
@@ -13,6 +13,46 @@ pub struct Simulation {
     pub network: Network,
     trains: Vec<Train>,
     dwell_policy: DwellPolicy,
+}
+
+struct DepartureCandidate {
+    from: StationId,
+    to: StationId,
+    direction: Direction,
+}
+
+fn select_departure_candidate(
+    network: &Network,
+    station: StationId,
+    direction: Direction,
+) -> Option<DepartureCandidate> {
+    network
+        .next_track(station, direction)
+        .map(|track| DepartureCandidate {
+            from: station,
+            to: track.to,
+            direction,
+        })
+        .or_else(|| {
+            let direction = direction.reverse();
+            network
+                .next_track(station, direction)
+                .map(|track| DepartureCandidate {
+                    from: station,
+                    to: track.to,
+                    direction,
+                })
+        })
+}
+
+fn commit_departure(train: &mut Train, candidate: DepartureCandidate) {
+    train.direction = candidate.direction;
+    train.velocity = 1;
+    train.state = TrainState::Moving {
+        from: candidate.from,
+        to: candidate.to,
+        elapsed_seconds: 0,
+    };
 }
 
 fn dwelling_snapshot_state(
@@ -66,27 +106,9 @@ impl Simulation {
                     TrainState::Moving { .. } => return Ok(()),
                     TrainState::AtStation { station, .. } => station,
                 };
-                let direction = train.direction;
-                let (selected_direction, to) = self
-                    .network
-                    .next_track(station, direction)
-                    .map(|track| (direction, track.to))
-                    .or_else(|| {
-                        let reversed = direction.reverse();
-                        self.network
-                            .next_track(station, reversed)
-                            .map(|track| (reversed, track.to))
-                    })
+                let candidate = select_departure_candidate(&self.network, station, train.direction)
                     .ok_or(CommandError::NoOutgoingTrack)?;
-
-                let train = &mut self.trains[index];
-                train.direction = selected_direction;
-                train.velocity = 1;
-                train.state = TrainState::Moving {
-                    from: station,
-                    to,
-                    elapsed_seconds: 0,
-                };
+                commit_departure(&mut self.trains[index], candidate);
                 Ok(())
             }
         }
@@ -169,28 +191,10 @@ impl Simulation {
                 } else {
                     match train.control {
                         TrainControl::Automatic => {
-                            match network.next_track(station, train.direction) {
-                                Some(next_track) => {
-                                    train.state = TrainState::Moving {
-                                        from: station,
-                                        to: next_track.to,
-                                        elapsed_seconds: 0,
-                                    };
-                                    train.velocity = 1;
-                                }
-                                None => {
-                                    let next_track = network
-                                        .next_track(station, train.direction.reverse())
-                                        .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
-                                    train.state = TrainState::Moving {
-                                        from: station,
-                                        to: next_track.to,
-                                        elapsed_seconds: 0,
-                                    };
-                                    train.direction = train.direction.reverse();
-                                    train.velocity = 1;
-                                }
-                            }
+                            let candidate =
+                                select_departure_candidate(network, station, train.direction)
+                                    .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
+                            commit_departure(train, candidate);
                         }
                         TrainControl::Manual => {
                             train.state = TrainState::AtStation {
@@ -530,6 +534,133 @@ mod tests {
                 elapsed_seconds: 0,
             }
         );
+    }
+
+    #[test]
+    fn reverse_candidate_changes_train_only_when_committed() {
+        let SimulationFixture {
+            network,
+            stations: [_, b, c],
+            ..
+        } = SimulationFixture::new(["A", "B", "C"], 10);
+        let mut train = Train::new_manual(TrainId(42), 100, c, Direction::Forward);
+        let before = train.clone();
+        let TrainState::AtStation { station, .. } = train.state else {
+            panic!("expected station state");
+        };
+        let candidate = select_departure_candidate(&network, station, train.direction).unwrap();
+
+        assert_eq!(candidate.from, c);
+        assert_eq!(candidate.to, b);
+        assert_eq!(candidate.direction, Direction::Backward);
+        assert_eq!(train.id, before.id);
+        assert_eq!(train.capacity, before.capacity);
+        assert_eq!(train.control, before.control);
+        assert_eq!(train.state, before.state);
+        assert_eq!(train.direction, before.direction);
+        assert_eq!(train.velocity, before.velocity);
+
+        commit_departure(&mut train, candidate);
+
+        assert_eq!(train.id, before.id);
+        assert_eq!(train.capacity, before.capacity);
+        assert_eq!(train.control, before.control);
+        assert_eq!(train.direction, Direction::Backward);
+        assert_eq!(train.velocity, 1);
+        assert_eq!(
+            train.state,
+            TrainState::Moving {
+                from: c,
+                to: b,
+                elapsed_seconds: 0
+            }
+        );
+    }
+
+    #[test]
+    fn automatic_departure_selects_current_direction_or_reverse_fallback() {
+        for (station, direction, gap, to, selected_direction) in [
+            (1, Direction::Forward, false, 2, Direction::Forward),
+            (1, Direction::Backward, false, 0, Direction::Backward),
+            (2, Direction::Forward, false, 1, Direction::Backward),
+            (0, Direction::Backward, false, 1, Direction::Forward),
+            (1, Direction::Forward, true, 0, Direction::Backward),
+        ] {
+            let mut network = Network::new();
+            let a = network.add_station("A");
+            let b = network.add_station("B");
+            let c = network.add_station("C");
+            network.connect_bidirectional(a, b, 10);
+            if !gap {
+                network.connect_bidirectional(b, c, 10);
+            }
+            let train = Train::new(TrainId(42), 100, StationId(station), direction);
+            let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
+
+            for elapsed_seconds in 0..3 {
+                assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
+                let train = &simulation.trains()[0];
+                assert_eq!(train.direction, direction);
+                assert_eq!(train.velocity, 0);
+                assert_eq!(
+                    train.state,
+                    TrainState::AtStation {
+                        station: StationId(station),
+                        state: AtStationState::Dwelling {
+                            elapsed_seconds,
+                            dwell_seconds: 3
+                        },
+                    }
+                );
+                simulation.step();
+            }
+
+            let train = &simulation.trains()[0];
+            assert_eq!(simulation.elapsed_seconds, 3);
+            assert_eq!(train.direction, selected_direction);
+            assert_eq!(train.velocity, 1);
+            assert_eq!(
+                train.state,
+                TrainState::Moving {
+                    from: StationId(station),
+                    to: StationId(to),
+                    elapsed_seconds: 0,
+                }
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION")]
+    fn automatic_departure_without_outgoing_track_preserves_panic() {
+        let mut network = Network::new();
+        let station = network.add_station("Isolated");
+        let train = Train::new(TrainId(0), 100, station, Direction::Forward);
+        let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
+        for _ in 0..3 {
+            simulation.step();
+        }
+    }
+
+    #[test]
+    fn automatic_ready_train_does_not_retry_departure() {
+        let SimulationFixture {
+            network,
+            stations: [a, _],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 10);
+        let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
+        train.state = TrainState::AtStation {
+            station: a,
+            state: AtStationState::Ready,
+        };
+        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
+        let before = simulation.snapshot();
+        for elapsed_seconds in 1..=3 {
+            simulation.step();
+            assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
+            assert_eq!(simulation.snapshot().trains, before.trains);
+        }
     }
 
     #[test]

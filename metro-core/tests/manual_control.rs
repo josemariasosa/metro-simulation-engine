@@ -481,6 +481,15 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
 }
 
 #[test]
+fn non_manual_validation_precedes_departure_selection() {
+    let mut network = Network::new();
+    let station = network.add_station("Isolated");
+    let train = Train::new(TrainId(42), 100, station, Direction::Forward);
+    let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
+    assert_command_unchanged(&mut simulation, TrainId(42), Err(CommandError::NotManual));
+}
+
+#[test]
 fn acceleration_selects_current_direction_or_reverse_fallback() {
     // Exercise both directions, endpoints, and a missing forward track at B.
     for (station, direction, gap, expected_to, expected_direction) in [
@@ -503,6 +512,8 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
         let mut simulation = Simulation::new(network, vec![other, train], DwellPolicy::new());
         simulation.step();
         let before = simulation.snapshot();
+        let other_before = simulation.trains()[0].clone();
+        let target_before = simulation.trains()[1].clone();
         assert_eq!(
             simulation.trains()[1].state,
             TrainState::AtStation {
@@ -521,6 +532,12 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
         let after = simulation.snapshot();
         assert_eq!(after.elapsed_seconds, before.elapsed_seconds);
         assert_eq!(after.trains[0], before.trains[0]);
+        let other_after = &simulation.trains()[0];
+        assert_eq!(other_after.id, other_before.id);
+        assert_eq!(other_after.capacity, other_before.capacity);
+        assert_eq!(other_after.state, other_before.state);
+        assert_eq!(simulation.trains()[1].id, target_before.id);
+        assert_eq!(simulation.trains()[1].capacity, target_before.capacity);
         assert_eq!(after.trains[1].direction, expected_direction);
         assert_eq!(after.trains[1].velocity, 1);
         // The unfinished dwell is replaced, and no traversal second is consumed.
