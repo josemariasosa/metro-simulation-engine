@@ -45,6 +45,11 @@ fn select_departure_candidate(
         })
 }
 
+fn can_admit_departure(candidate: &DepartureCandidate, resources: &ResourceView) -> bool {
+    resources.track_available(candidate.from, candidate.to)
+        && resources.station_slot_available(candidate.to, candidate.direction)
+}
+
 fn commit_departure(train: &mut Train, candidate: DepartureCandidate) {
     train.direction = candidate.direction;
     train.velocity = 1;
@@ -108,6 +113,10 @@ impl Simulation {
                 };
                 let candidate = select_departure_candidate(&self.network, station, train.direction)
                     .ok_or(CommandError::NoOutgoingTrack)?;
+                let resources = ResourceView::derive(&self.trains);
+                if !can_admit_departure(&candidate, &resources) {
+                    return Err(CommandError::Blocked);
+                }
                 commit_departure(&mut self.trains[index], candidate);
                 Ok(())
             }
@@ -278,6 +287,192 @@ mod tests {
     use crate::train::{Direction, Train, TrainId, TrainState};
 
     use super::*;
+
+    fn assert_blocked_unchanged(simulation: &mut Simulation, train_id: TrainId) {
+        let before = simulation.snapshot();
+        let trains = simulation.trains.clone();
+        let resources = ResourceView::derive(&simulation.trains);
+        assert_eq!(
+            simulation.apply_command(TrainCommand::Accelerate { train_id }),
+            Err(CommandError::Blocked)
+        );
+        assert_eq!(simulation.snapshot(), before);
+        assert_eq!(simulation.trains.len(), trains.len());
+        for (actual, expected) in simulation.trains.iter().zip(&trains) {
+            assert_eq!(actual.id, expected.id);
+            assert_eq!(actual.capacity, expected.capacity);
+            assert_eq!(actual.control, expected.control);
+            assert_eq!(actual.state, expected.state);
+            assert_eq!(actual.direction, expected.direction);
+            assert_eq!(actual.velocity, expected.velocity);
+        }
+        assert_eq!(ResourceView::derive(&simulation.trains), resources);
+    }
+
+    #[test]
+    fn occupied_track_and_reserved_destination_block_manual_departure_exactly() {
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 10);
+        let train = Train::new_manual(TrainId(1), 100, a, Direction::Forward);
+        let mut blocker = moving_train(2, a, b, Direction::Forward);
+        blocker.state = TrainState::Moving {
+            from: a,
+            to: b,
+            elapsed_seconds: 4,
+        };
+        let mut simulation = Simulation::new(network, vec![train, blocker], dwell_policy);
+        let resources = ResourceView::derive(simulation.trains());
+        assert!(!resources.track_available(a, b));
+        assert!(!resources.station_slot_available(b, Direction::Forward));
+        assert_blocked_unchanged(&mut simulation, TrainId(1));
+    }
+
+    #[test]
+    fn occupied_destination_blocks_during_dwell_and_after_ready_exactly() {
+        let SimulationFixture {
+            network,
+            stations: [a, b],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B"], 2);
+        let trains = vec![
+            Train::new_manual(TrainId(1), 100, a, Direction::Forward),
+            Train::new_manual(TrainId(2), 100, b, Direction::Forward),
+        ];
+        let mut simulation = Simulation::new(network, trains, dwell_policy);
+        for elapsed in 0..=3 {
+            assert_eq!(simulation.elapsed_seconds, elapsed);
+            assert_blocked_unchanged(&mut simulation, TrainId(1));
+            if elapsed < 3 {
+                simulation.step();
+            }
+        }
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: a,
+                state: AtStationState::Ready,
+            }
+        );
+    }
+
+    #[test]
+    fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            Train::new_manual(TrainId(1), 100, c, Direction::Forward),
+            Train::new_manual(TrainId(2), 100, b, Direction::Backward),
+        ];
+        let mut simulation = Simulation::new(network, trains, dwell_policy);
+        simulation.step();
+        assert_blocked_unchanged(&mut simulation, TrainId(1));
+        assert_eq!(simulation.trains()[0].direction, Direction::Forward);
+        simulation
+            .apply_command(TrainCommand::Accelerate {
+                train_id: TrainId(2),
+            })
+            .unwrap();
+        assert_eq!(
+            simulation.trains()[1].state,
+            TrainState::Moving {
+                from: b,
+                to: a,
+                elapsed_seconds: 0,
+            }
+        );
+        simulation.step();
+        assert_eq!(simulation.trains()[0].direction, Direction::Forward);
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::AtStation {
+                station: c,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: 2,
+                    dwell_seconds: 3
+                },
+            }
+        );
+        simulation
+            .apply_command(TrainCommand::Accelerate {
+                train_id: TrainId(1),
+            })
+            .unwrap();
+        assert_eq!(simulation.elapsed_seconds, 2);
+        assert_eq!(simulation.trains()[0].direction, Direction::Backward);
+        assert_eq!(simulation.trains()[0].velocity, 1);
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: c,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+        ResourceView::derive(simulation.trains());
+    }
+
+    #[test]
+    fn physical_blocking_of_existing_track_never_selects_reverse_fallback() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            Train::new_manual(TrainId(1), 100, b, Direction::Forward),
+            moving_train(2, b, c, Direction::Forward),
+        ];
+        let mut simulation = Simulation::new(network, trains, dwell_policy);
+        let resources = ResourceView::derive(simulation.trains());
+        let reverse =
+            select_departure_candidate(&simulation.network, b, Direction::Backward).unwrap();
+        assert_eq!(reverse.to, a);
+        assert!(can_admit_departure(&reverse, &resources));
+        assert_blocked_unchanged(&mut simulation, TrainId(1));
+    }
+
+    #[test]
+    fn opposite_destination_slots_and_reverse_tracks_do_not_block_manual_departure() {
+        for blocker_kind in 0..3 {
+            let SimulationFixture {
+                network,
+                stations: [a, b, c],
+                dwell_policy,
+            } = SimulationFixture::new(["A", "B", "C"], 2);
+            let train = Train::new_manual(TrainId(1), 100, a, Direction::Forward);
+            let blocker = match blocker_kind {
+                0 => Train::new_manual(TrainId(2), 100, b, Direction::Backward),
+                1 => moving_train(2, c, b, Direction::Backward),
+                _ => moving_train(2, b, a, Direction::Backward),
+            };
+            let mut simulation = Simulation::new(network, vec![train, blocker], dwell_policy);
+            let before = simulation.snapshot();
+            simulation
+                .apply_command(TrainCommand::Accelerate {
+                    train_id: TrainId(1),
+                })
+                .unwrap();
+            assert_eq!(simulation.elapsed_seconds, before.elapsed_seconds);
+            assert_eq!(simulation.snapshot().trains[1], before.trains[1]);
+            assert_eq!(
+                simulation.trains()[0].state,
+                TrainState::Moving {
+                    from: a,
+                    to: b,
+                    elapsed_seconds: 0,
+                }
+            );
+            assert_eq!(simulation.trains()[0].direction, Direction::Forward);
+            assert_eq!(simulation.trains()[0].velocity, 1);
+            ResourceView::derive(simulation.trains());
+        }
+    }
 
     /// A fresh bidirectional line for each test. Station IDs follow the supplied order.
     struct SimulationFixture<const N: usize> {

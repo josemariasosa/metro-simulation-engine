@@ -9,6 +9,7 @@ struct StationSlot {
 }
 
 #[derive(Debug, Default)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct ResourceView {
     station_occupants: HashMap<StationSlot, TrainId>,
     station_reservations: HashMap<StationSlot, TrainId>,
@@ -16,6 +17,16 @@ pub(crate) struct ResourceView {
 }
 
 impl ResourceView {
+    pub(crate) fn track_available(&self, from: StationId, to: StationId) -> bool {
+        !self.track_occupants.contains_key(&(from, to))
+    }
+
+    pub(crate) fn station_slot_available(&self, station: StationId, direction: Direction) -> bool {
+        let slot = StationSlot { station, direction };
+        !self.station_occupants.contains_key(&slot)
+            && !self.station_reservations.contains_key(&slot)
+    }
+
     fn reserve_station(&mut self, slot: StationSlot, owner: TrainId) {
         assert!(
             !self.station_occupants.contains_key(&slot),
@@ -73,6 +84,101 @@ mod tests {
     use crate::network::Network;
     use crate::test_utils::moving_train;
     use crate::train::AtStationState;
+
+    #[test]
+    fn availability_checks_track_occupancy_and_both_slot_claims() {
+        let a = StationId(0);
+        let b = StationId(1);
+        let empty = ResourceView::default();
+        assert!(empty.track_available(a, b));
+        assert!(empty.station_slot_available(b, Direction::Forward));
+
+        let occupied = ResourceView::derive(&[Train::new(TrainId(1), 100, b, Direction::Forward)]);
+        assert!(occupied.track_available(a, b));
+        assert!(!occupied.station_slot_available(b, Direction::Forward));
+        assert!(occupied.station_slot_available(b, Direction::Backward));
+
+        let reserved = ResourceView::derive(&[moving_train(1, a, b, Direction::Forward)]);
+        assert!(!reserved.track_available(a, b));
+        assert!(reserved.track_available(b, a));
+        assert!(!reserved.station_slot_available(b, Direction::Forward));
+        assert!(reserved.station_slot_available(b, Direction::Backward));
+        assert!(reserved.station_slot_available(a, Direction::Forward));
+    }
+
+    #[test]
+    fn admitted_departure_rederives_exact_ownership_including_reversal() {
+        use crate::command::TrainCommand;
+        use crate::dwell::DwellPolicy;
+        use crate::simulation::Simulation;
+
+        for reverse in [false, true] {
+            let mut network = Network::new();
+            let a = network.add_station("A");
+            let b = network.add_station("B");
+            network.connect_bidirectional(a, b, 2);
+            let (from, to, direction) = if reverse {
+                (b, a, Direction::Backward)
+            } else {
+                (a, b, Direction::Forward)
+            };
+            let train = Train::new_manual(TrainId(1), 100, from, Direction::Forward);
+            // A reversal must not require the opposite source slot to be free.
+            let other = Train::new_manual(TrainId(2), 100, from, Direction::Backward);
+            let mut simulation = Simulation::new(network, vec![train, other], DwellPolicy::new());
+            let before = ResourceView::derive(simulation.trains());
+            let source = StationSlot {
+                station: from,
+                direction: Direction::Forward,
+            };
+            assert_eq!(before.station_occupants.get(&source), Some(&TrainId(1)));
+
+            simulation
+                .apply_command(TrainCommand::Accelerate {
+                    train_id: TrainId(1),
+                })
+                .unwrap();
+
+            assert_eq!(simulation.elapsed_seconds, 0);
+            let train = &simulation.trains()[0];
+            assert_eq!(train.direction, direction);
+            assert_eq!(train.velocity, 1);
+            assert_eq!(
+                train.state,
+                TrainState::Moving {
+                    from,
+                    to,
+                    elapsed_seconds: 0
+                }
+            );
+            let after = ResourceView::derive(simulation.trains());
+            assert!(!after.station_occupants.contains_key(&source));
+            assert_eq!(
+                after.station_occupants,
+                HashMap::from([(
+                    StationSlot {
+                        station: from,
+                        direction: Direction::Backward
+                    },
+                    TrainId(2)
+                ),])
+            );
+            assert_eq!(
+                after.track_occupants,
+                HashMap::from([((from, to), TrainId(1))])
+            );
+            assert_eq!(
+                after.station_reservations,
+                HashMap::from([(
+                    StationSlot {
+                        station: to,
+                        direction
+                    },
+                    TrainId(1)
+                ),])
+            );
+        }
+    }
 
     #[test]
     fn resource_view_preserves_opposite_slot_owners() {

@@ -400,6 +400,76 @@ fn assert_command_unchanged(
 }
 
 #[test]
+fn blocked_manual_intent_is_not_buffered_when_destination_becomes_available() {
+    let mut network = Network::new();
+    let a = network.add_station("A");
+    let b = network.add_station("B");
+    let c = network.add_station("C");
+    network.connect_bidirectional(a, b, 2);
+    network.connect_bidirectional(b, c, 2);
+    let trains = vec![
+        Train::new_manual(TrainId(1), 100, a, Direction::Forward),
+        Train::new_manual(TrainId(2), 100, b, Direction::Forward),
+    ];
+    let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
+    assert_command_unchanged(&mut simulation, TrainId(1), Err(CommandError::Blocked));
+    simulation
+        .apply_command(TrainCommand::Accelerate {
+            train_id: TrainId(2),
+        })
+        .unwrap();
+    assert_eq!(simulation.elapsed_seconds, 0);
+
+    for elapsed in 1..=3 {
+        simulation.step();
+        assert_eq!(simulation.elapsed_seconds, elapsed);
+        let snapshot = simulation.snapshot();
+        let train = snapshot
+            .trains
+            .iter()
+            .find(|train| train.id == TrainId(1))
+            .unwrap();
+        assert_eq!(train.direction, Direction::Forward);
+        assert_eq!(train.velocity, 0);
+        assert_eq!(
+            train.state,
+            if elapsed < 3 {
+                TrainSnapshotState::Dwelling {
+                    station: a,
+                    remaining_seconds: 3 - elapsed,
+                }
+            } else {
+                TrainSnapshotState::Ready { station: a }
+            }
+        );
+    }
+
+    simulation
+        .apply_command(TrainCommand::Accelerate {
+            train_id: TrainId(1),
+        })
+        .unwrap();
+    let snapshot = simulation.snapshot();
+    assert_eq!(snapshot.elapsed_seconds, 3);
+    let train = snapshot
+        .trains
+        .iter()
+        .find(|train| train.id == TrainId(1))
+        .unwrap();
+    assert_eq!(train.direction, Direction::Forward);
+    assert_eq!(train.velocity, 1);
+    assert_eq!(
+        train.state,
+        TrainSnapshotState::Moving {
+            from: a,
+            to: b,
+            elapsed_seconds: 0,
+            travel_seconds: 2,
+        }
+    );
+}
+
+#[test]
 fn command_rejections_preserve_all_trains_and_timers() {
     let mut network = Network::new();
     let a = network.add_station("A");

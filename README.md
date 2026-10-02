@@ -598,3 +598,12 @@ The long-term goal is to build a small but rigorous environment for experimentin
 And, naturally:
 
 **God bless trains. 🚇**
+
+## License
+
+This project is licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

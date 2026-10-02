@@ -10,4 +10,5 @@ pub enum CommandError {
     UnknownTrain,
     NotManual,
     NoOutgoingTrack,
+    Blocked,
 }
