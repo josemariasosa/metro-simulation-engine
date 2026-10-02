@@ -8,7 +8,7 @@ use crate::dwell::DwellPolicy;
 use crate::network::Network;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Train, TrainControl, TrainState};
+use crate::train::{AtStationState, Train, TrainState};
 
 #[derive(Debug)]
 pub struct Simulation {
@@ -173,7 +173,7 @@ impl Simulation {
         let starting_resources = ResourceView::derive(&self.trains);
         let mut proposals = Vec::new();
         for (train_index, train) in self.trains.iter().enumerate() {
-            if train.control != TrainControl::Automatic {
+            if !train.is_automatic_control() {
                 continue;
             }
             let TrainState::AtStation { station, state } = train.state else {
@@ -285,7 +285,11 @@ mod tests {
         for (actual, expected) in simulation.trains.iter().zip(&trains) {
             assert_eq!(actual.id, expected.id);
             assert_eq!(actual.capacity, expected.capacity);
-            assert_eq!(actual.control, expected.control);
+            assert_eq!(actual.is_manual_control(), expected.is_manual_control());
+            assert_eq!(
+                actual.is_automatic_control(),
+                expected.is_automatic_control()
+            );
             assert_eq!(actual.state, expected.state);
             assert_eq!(actual.direction, expected.direction);
             assert_eq!(actual.velocity(), expected.velocity());
@@ -854,7 +858,8 @@ mod tests {
         assert_eq!(candidate.direction, Direction::Backward);
         assert_eq!(train.id, before.id);
         assert_eq!(train.capacity, before.capacity);
-        assert_eq!(train.control, before.control);
+        assert_eq!(train.is_manual_control(), before.is_manual_control());
+        assert_eq!(train.is_automatic_control(), before.is_automatic_control());
         assert_eq!(train.state, before.state);
         assert_eq!(train.direction, before.direction);
         assert_eq!(train.velocity(), before.velocity());
@@ -863,7 +868,8 @@ mod tests {
 
         assert_eq!(train.id, before.id);
         assert_eq!(train.capacity, before.capacity);
-        assert_eq!(train.control, before.control);
+        assert_eq!(train.is_manual_control(), before.is_manual_control());
+        assert_eq!(train.is_automatic_control(), before.is_automatic_control());
         assert_eq!(train.direction, Direction::Backward);
         assert_eq!(train.velocity(), 1);
         assert_eq!(
@@ -1000,7 +1006,7 @@ mod tests {
             Direction::Forward,
             DwellPolicy::default_dwell_seconds(),
         );
-        assert_eq!(train.control, crate::train::TrainControl::Automatic);
+        assert!(train.is_automatic_control());
 
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
 

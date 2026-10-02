@@ -63,7 +63,11 @@ fn assert_world(sim: &Simulation, time: u64, trains: &[Train]) {
     for (actual, expected) in sim.trains().iter().zip(trains) {
         assert_eq!(actual.id, expected.id);
         assert_eq!(actual.capacity, expected.capacity);
-        assert_eq!(actual.control, expected.control);
+        assert_eq!(actual.is_manual_control(), expected.is_manual_control());
+        assert_eq!(
+            actual.is_automatic_control(),
+            expected.is_automatic_control()
+        );
         assert_eq!(actual.direction, expected.direction);
         assert_eq!(actual.velocity(), expected.velocity());
         assert_eq!(actual.state, expected.state);

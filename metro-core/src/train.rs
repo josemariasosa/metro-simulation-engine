@@ -52,7 +52,7 @@ pub struct Train {
     pub capacity: usize,
     pub state: TrainState,
     pub direction: Direction,
-    pub(crate) control: TrainControl,
+    control: TrainControl,
     velocity: u8,
 }
 
@@ -174,6 +174,10 @@ impl Train {
 
     pub(crate) fn is_manual_control(&self) -> bool {
         self.control == TrainControl::Manual
+    }
+
+    pub(crate) fn is_automatic_control(&self) -> bool {
+        self.control == TrainControl::Automatic
     }
 }
 
