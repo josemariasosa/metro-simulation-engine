@@ -1,6 +1,8 @@
+use crate::domain::resource::{ResourceView, StationSlot};
 use crate::dwell::DwellPolicy;
 use crate::station::StationId;
 use crate::train::{Direction, Train, TrainId, TrainState};
+use std::collections::HashMap;
 
 /// Checks committed state without taking an observation, including in sparse-observation runs.
 pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
@@ -38,7 +40,41 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
     }
     // Exact map equality also excludes extra ownership: stopped trains have only
     // occupancy; moving trains have only their track and destination reservation.
-    crate::resource::assert_claims(sim.trains(), &occupants, &reservations, &tracks);
+    assert_claims(sim.trains(), &occupants, &reservations, &tracks);
+}
+
+pub(crate) fn assert_claims(
+    trains: &[Train],
+    occupants: &[(StationId, Direction, TrainId)],
+    reservations: &[(StationId, Direction, TrainId)],
+    tracks: &[(StationId, StationId, TrainId)],
+) {
+    let slots = |claims: &[(StationId, Direction, TrainId)]| {
+        let mut result = HashMap::new();
+        for &(station, direction, owner) in claims {
+            assert!(
+                result
+                    .insert(StationSlot { station, direction }, owner)
+                    .is_none()
+            );
+        }
+        result
+    };
+    let expected_occupants = slots(occupants);
+    let expected_reservations = slots(reservations);
+    assert!(
+        expected_occupants
+            .keys()
+            .all(|slot| !expected_reservations.contains_key(slot))
+    );
+    let mut expected_tracks = HashMap::new();
+    for &(from, to, owner) in tracks {
+        assert!(expected_tracks.insert((from, to), owner).is_none());
+    }
+    let actual = ResourceView::derive(trains);
+    assert_eq!(actual.station_occupants, expected_occupants);
+    assert_eq!(actual.station_reservations, expected_reservations);
+    assert_eq!(actual.track_occupants, expected_tracks);
 }
 
 pub fn moving_train(id: usize, from: StationId, to: StationId, direction: Direction) -> Train {

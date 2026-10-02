@@ -1,15 +1,14 @@
+use std::collections::HashSet;
+
 use crate::command::{CommandError, TrainCommand};
-use crate::domain::departure::{
-    AutomaticDepartureDecision, AutomaticDepartureProposal, DepartureCandidate,
-};
+use crate::domain::departure::{AutomaticDepartureDecision, AutomaticDepartureProposal};
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
+use crate::domain::resource::ResourceView;
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
-use crate::resource::ResourceView;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
 use crate::train::{AtStationState, Train, TrainControl, TrainState};
-use std::collections::HashSet;
 
 #[derive(Debug)]
 pub struct Simulation {
@@ -33,16 +32,6 @@ fn dwelling_snapshot_state(
         station,
         remaining_seconds: dwell_seconds - elapsed_seconds,
     }
-}
-
-fn commit_departure(train: &mut Train, candidate: DepartureCandidate) {
-    train.direction = candidate.direction;
-    train.velocity = 1;
-    train.state = TrainState::Moving {
-        from: candidate.from,
-        to: candidate.to,
-        elapsed_seconds: 0,
-    };
 }
 
 impl Simulation {
@@ -86,7 +75,7 @@ impl Simulation {
                 if !can_admit_departure(&candidate, &resources) {
                     return Err(CommandError::Blocked);
                 }
-                commit_departure(&mut self.trains[index], candidate);
+                self.trains[index].apply_departure(candidate);
                 Ok(())
             }
         }
@@ -262,7 +251,7 @@ impl Simulation {
         for (train, decision) in self.trains.iter_mut().zip(decisions) {
             match decision {
                 AutomaticDepartureDecision::Accepted(candidate) => {
-                    commit_departure(train, candidate);
+                    train.apply_departure(candidate);
                     continue;
                 }
                 AutomaticDepartureDecision::Rejected { station } => {
@@ -898,7 +887,7 @@ mod tests {
         assert_eq!(train.direction, before.direction);
         assert_eq!(train.velocity, before.velocity);
 
-        commit_departure(&mut train, candidate);
+        train.apply_departure(candidate);
 
         assert_eq!(train.id, before.id);
         assert_eq!(train.capacity, before.capacity);

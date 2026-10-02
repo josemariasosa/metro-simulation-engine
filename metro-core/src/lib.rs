@@ -2,7 +2,6 @@ pub mod command;
 mod domain;
 pub mod dwell;
 pub mod network;
-pub mod resource;
 pub mod simulation;
 pub mod snapshot;
 pub mod station;

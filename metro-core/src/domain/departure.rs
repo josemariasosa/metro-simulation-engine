@@ -1,5 +1,5 @@
+use crate::domain::resource::ResourceView;
 use crate::network::Network;
-use crate::resource::ResourceView;
 use crate::station::StationId;
 use crate::train::{Direction, TrainId};
 
@@ -56,10 +56,7 @@ pub(crate) fn can_admit_departure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resource::ResourceView;
-    use crate::station::StationId;
     use crate::test_utils::utils::moving_train;
-    use crate::train::Direction;
 
     // Synthetic claims isolate each guard; real moving trains claim both resources.
     fn candidate() -> DepartureCandidate {
