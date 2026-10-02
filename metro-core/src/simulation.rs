@@ -4,7 +4,7 @@ use crate::network::Network;
 use crate::resource::ResourceView;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Direction, Train, TrainControl, TrainState};
+use crate::train::{AtStationState, Direction, Train, TrainControl, TrainId, TrainState};
 use std::collections::HashSet;
 
 #[derive(Debug)]
@@ -19,6 +19,18 @@ struct DepartureCandidate {
     from: StationId,
     to: StationId,
     direction: Direction,
+}
+
+struct AutomaticDepartureProposal {
+    train_index: usize,
+    train_id: TrainId,
+    candidate: DepartureCandidate,
+}
+
+enum AutomaticDepartureDecision {
+    NotEligible,
+    Accepted(DepartureCandidate),
+    Rejected { station: StationId },
 }
 
 fn select_departure_candidate(
@@ -178,12 +190,7 @@ impl Simulation {
         }
     }
 
-    fn step_at_station(
-        network: &Network,
-        train: &mut Train,
-        station: StationId,
-        state: AtStationState,
-    ) {
+    fn step_at_station(train: &mut Train, station: StationId, state: AtStationState) {
         match state {
             AtStationState::Dwelling {
                 elapsed_seconds,
@@ -198,21 +205,11 @@ impl Simulation {
                         },
                     };
                 } else {
-                    match train.control {
-                        TrainControl::Automatic => {
-                            let candidate =
-                                select_departure_candidate(network, station, train.direction)
-                                    .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION");
-                            commit_departure(train, candidate);
-                        }
-                        TrainControl::Manual => {
-                            train.state = TrainState::AtStation {
-                                station,
-                                state: AtStationState::Ready,
-                            };
-                            train.velocity = 0;
-                        }
-                    }
+                    train.state = TrainState::AtStation {
+                        station,
+                        state: AtStationState::Ready,
+                    };
+                    train.velocity = 0;
                 }
             }
             AtStationState::Ready => {
@@ -250,12 +247,80 @@ impl Simulation {
     }
 
     pub fn step(&mut self) {
-        self.elapsed_seconds += 1;
+        // World N stays immutable until every automatic departure is resolved.
+        let starting_resources = ResourceView::derive(&self.trains);
+        let mut proposals = Vec::new();
+        for (train_index, train) in self.trains.iter().enumerate() {
+            if train.control != TrainControl::Automatic {
+                continue;
+            }
+            let TrainState::AtStation { station, state } = train.state else {
+                continue;
+            };
+            let eligible = match state {
+                AtStationState::Ready => true,
+                AtStationState::Dwelling {
+                    elapsed_seconds,
+                    dwell_seconds,
+                } => elapsed_seconds + 1 >= dwell_seconds,
+            };
+            if eligible {
+                proposals.push(AutomaticDepartureProposal {
+                    train_index,
+                    train_id: train.id,
+                    candidate: select_departure_candidate(&self.network, station, train.direction)
+                        .expect("NO_NEXT_TRACK_AFTER_REVERSING_DIRECTION"),
+                });
+            }
+        }
+        proposals.sort_unstable_by_key(|proposal| proposal.train_id.0);
 
-        for train in &mut self.trains {
+        let mut accepted_tracks = HashSet::new();
+        let mut accepted_destination_slots = HashSet::new();
+        let mut decisions: Vec<_> = self
+            .trains
+            .iter()
+            .map(|_| AutomaticDepartureDecision::NotEligible)
+            .collect();
+        for proposal in proposals {
+            let candidate = proposal.candidate;
+            let track = (candidate.from, candidate.to);
+            let slot = (candidate.to, candidate.direction);
+            decisions[proposal.train_index] =
+                if can_admit_departure(&candidate, &starting_resources)
+                    && !accepted_tracks.contains(&track)
+                    && !accepted_destination_slots.contains(&slot)
+                {
+                    accepted_tracks.insert(track);
+                    accepted_destination_slots.insert(slot);
+                    AutomaticDepartureDecision::Accepted(candidate)
+                } else {
+                    AutomaticDepartureDecision::Rejected {
+                        station: candidate.from,
+                    }
+                };
+        }
+
+        // Decisions are fixed: no train can use a resource released in this pass.
+        for (train, decision) in self.trains.iter_mut().zip(decisions) {
+            match decision {
+                AutomaticDepartureDecision::Accepted(candidate) => {
+                    commit_departure(train, candidate);
+                    continue;
+                }
+                AutomaticDepartureDecision::Rejected { station } => {
+                    train.state = TrainState::AtStation {
+                        station,
+                        state: AtStationState::Ready,
+                    };
+                    train.velocity = 0;
+                    continue;
+                }
+                AutomaticDepartureDecision::NotEligible => {}
+            }
             match train.state {
                 TrainState::AtStation { station, state } => {
-                    Self::step_at_station(&self.network, train, station, state);
+                    Self::step_at_station(train, station, state);
                 }
 
                 TrainState::Moving {
@@ -274,6 +339,7 @@ impl Simulation {
                 }
             }
         }
+        self.elapsed_seconds += 1;
     }
 
     pub fn trains(&self) -> &[Train] {
@@ -838,10 +904,10 @@ mod tests {
     }
 
     #[test]
-    fn automatic_ready_train_does_not_retry_departure() {
+    fn automatic_ready_train_retries_departure_on_next_step() {
         let SimulationFixture {
             network,
-            stations: [a, _],
+            stations: [a, b],
             dwell_policy,
         } = SimulationFixture::new(["A", "B"], 10);
         let mut train = Train::new(TrainId(0), 100, a, Direction::Forward);
@@ -850,12 +916,17 @@ mod tests {
             state: AtStationState::Ready,
         };
         let mut simulation = Simulation::new(network, vec![train], dwell_policy);
-        let before = simulation.snapshot();
-        for elapsed_seconds in 1..=3 {
-            simulation.step();
-            assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
-            assert_eq!(simulation.snapshot().trains, before.trains);
-        }
+        simulation.step();
+        assert_eq!(simulation.elapsed_seconds, 1);
+        assert_eq!(
+            simulation.trains()[0].state,
+            TrainState::Moving {
+                from: a,
+                to: b,
+                elapsed_seconds: 0,
+            }
+        );
+        assert_eq!(simulation.snapshot().trains[0].velocity, 1);
     }
 
     #[test]
