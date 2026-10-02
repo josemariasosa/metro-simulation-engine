@@ -1,14 +1,8 @@
 use std::collections::HashMap;
 
 use crate::station::{Station, StationId};
+use crate::track::Track;
 use crate::train::Direction;
-
-#[derive(Debug)]
-pub struct Track {
-    pub from: StationId,
-    pub to: StationId,
-    pub travel_seconds: u64,
-}
 
 #[derive(Debug, Default)]
 pub struct Network {

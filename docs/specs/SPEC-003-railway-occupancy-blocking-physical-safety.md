@@ -436,13 +436,177 @@ These are future tests-first checkpoints, each ending in review. Approval of thi
 specification does not authorize starting one. No placeholder public APIs or
 unimplemented stubs are required.
 
-| Checkpoint | Tests first and work | Review stop |
-| --- | --- | --- |
-| 1. Derived resource view and validation | Prove directional ownership, opposite-slot coexistence, and rejection of incompatible setup. Add the temporary view and constructor checks; repair the overlapping rejection-test fixture. | Ownership facts are derived correctly; constructor checks and existing core tests pass. |
-| 2. Shared departure path | Protect existing route selection, reverse fallback, early manual departure, no-op movement commands, and timing. Consolidate private candidate selection and atomic commitment. | Both paths share departure mechanics with existing valid behavior preserved. |
-| 3. Admission for both modes | Add failing occupied/reserved-slot, manual rejection, automatic retry, terminal contention, and conga tests. Implement shared checks plus manual rejection and automatic frozen-world resolution together. | Neither control mode bypasses admission; Blocked is atomic; automatic Ready retries; new architectural tests pass. |
-| 4. Complete scenario proof | Extend traces for insertion-order independence, exact arrival, no source-slot transfer, observation independence, serial calls, and setup invariants. Fix only demonstrated contract defects. | Section 15 and boundary invariants are covered without extra abstractions. |
-| 5. Compatibility verification | Retain the five-station and uncontended timing assertions. Run `cargo test -p metro-core` and `cargo test --workspace`. | Acceptance scenarios and existing core/Bevy regressions pass; no Bevy behavior changes. |
+### Checkpoint 1 — Derived resource view and validation
+
+Tests first establish directional station-slot occupancy, moving-track occupancy,
+destination-slot reservation, and opposite-direction slot coexistence. Reject
+all incompatible initial ownership cases from section 15 and duplicate TrainIds;
+prove that resource derivation detects conflicts instead of overwriting owners.
+
+Implement only the private temporary resource view and the minimum constructor/setup
+validation required by sections 6 and 13. Preserve `Simulation::new()`'s signature
+and fail-fast behavior. Repair the invalid overlapping rejection fixture identified
+in section 16; do not expand into general malformed-configuration validation.
+
+**Review stop:** A committed state deterministically yields occupied station slots,
+occupied directed tracks, and reserved destination slots. Normal train behavior is
+unchanged, and all existing valid core tests remain green.
+
+### Checkpoint 2 — Shared departure candidate and commit path
+
+Protect existing behavior with tests for current-direction selection, reverse
+fallback only when the current-direction track does not exist, early manual
+acceleration, automatic departure timing, manual Ready behavior, already-moving
+Accelerate idempotence, no outgoing track, direction/velocity transitions, and
+traversal elapsed starting at zero. Preserve existing command validation order and
+`UnknownTrain`, `NotManual`, and `NoOutgoingTrack` behavior.
+
+Consolidate the duplicated manual/automatic mechanics into the smallest private
+representation/helpers for selecting a departure candidate and committing an
+accepted departure. Keep domain helpers independent of command and snapshot DTOs.
+Do not introduce physical rejection yet except where structurally unavoidable.
+
+**Review stop:** Manual and automatic paths share candidate-selection and
+departure-commit mechanics with valid existing behavior preserved. This is a
+behavior-preserving refactor protected by tests.
+
+### Checkpoint 3 — Single-departure physical admission
+
+Tests first prove admission of one candidate against one committed resource view:
+
+- An occupied outgoing directed track, occupied destination directional slot, or
+  reserved destination directional slot blocks departure; the opposite-direction
+  destination slot does not conflict.
+- Acceptance releases the original source slot, occupies the directed track,
+  reserves the selected destination slot, commits direction and velocity, and
+  enters Moving at elapsed zero in one atomic transition.
+- Rejection commits no direction change, velocity change, movement, or claim.
+  A blocked terminal reversal retains its original committed direction, and a
+  physically blocked existing track never triggers reverse fallback.
+
+Implement the shared physical-admission primitive and connect manual Accelerate
+end-to-end. Unavailable required resources return `CommandError::Blocked`
+synchronously with exact before/after equality for all trains, timers, claims,
+and global time. Cover early and post-dwell rejection, successful later reversal,
+and the section 15 manual no-buffering trace: availability alone never executes
+rejected intent; a fresh Accelerate is required.
+
+Prepare the small admission helper for automatic use, but do not require the full
+multi-candidate frozen-world resolver in this checkpoint.
+
+**Review stop:** Candidate plus committed resource view reliably yields accepted
+or blocked. Accepted transitions produce exactly the section 7 ownership changes,
+and manual physical blocking is synchronous, atomic, and unbuffered. This proves
+physical admission independently of multi-train arbitration.
+
+### Checkpoint 4 — Automatic frozen-world batch resolution
+
+Tests first establish automatic Ready retry: blocked dwell completion enters Ready
+in the original directional slot, and each subsequent step retries once without
+restarting dwell. Cover the automatic occupied-slot and blocked-reversal traces,
+including later acceptance, using the shared admission and commit mechanics.
+
+Prove that every automatic candidate uses the same starting ownership for
+World N → World N+1. Resources released during this transition cannot be reused by
+another proposal from World N. Resolve available-resource contention by ascending
+numeric `TrainId.0`, checking starting owners plus accepted claims; existing owners
+are never displaced. Train-vector and hash iteration order must not arbitrate.
+Use the valid linear-topology terminal contention fixture from section 15 and
+repeat with reversed train insertion order, comparing outcomes by ID.
+
+Make the canonical conga the central architectural test: A–B–C–D, bidirectional
+two-second tracks, and automatic Forward T1/T2/T3 initially dwelling at A/B/C with
+D empty. Assert the exact committed trace:
+
+| Global time | Expected committed world |
+| --- | --- |
+| 3 | T1 Ready A; T2 Ready B; T3 Moving C→D, elapsed 0 |
+| 4 | T1 Ready A; T2 Moving B→C, elapsed 0; T3 Moving C→D, elapsed 1 |
+| 5 | T1 Moving A→B, elapsed 0; T2 Moving B→C, elapsed 1; T3 Dwelling D, elapsed 0 |
+
+Repeat with reversed storage order while preserving each snapshot's vector order.
+Implement section 9's derive/collect, resolve, then commit sequence. Update each
+train once from its entry state and advance global time exactly one second; a
+departure consumes no travel second and an arrival consumes no dwell second or
+second departure. Do not introduce a generalized arrival/dwell proposal engine.
+
+**Review stop:** Automatic departures resolve against frozen World N before
+committing World N+1. Automatic Ready retry, lowest-ID contention, insertion-order
+independence, and the conga pass with no same-step cascading resource reuse.
+Both control modes now enforce the shared physical-admission rule.
+
+### Checkpoint 5 — Complete scenario and invariant proof
+
+Extend coverage across the complete contract and every remaining section 15 case:
+exact reservation-to-occupancy arrival lifecycle, opposite-direction coexistence,
+independent reverse-track use, no source-slot transfer during reversal, serial
+manual command ordering, observation independence, arrival atomicity, and all
+required construction/setup invariants. Prove that admitted traversal completes
+without further admission or mid-track stopping, retaining its reservation until
+arrival. A command sees preceding committed commands/steps and may use resources
+released by a completed step; serial command winners follow call order, not ID.
+
+Check every section 13 invariant at construction and each committed step/command
+boundary across acceptance traces:
+
+- Unique TrainIds and at most one owner per directional station slot or directed
+  track; no occupied/reserved slot conflict.
+- Moving owns exactly its track and destination reservation, neither endpoint
+  slot; AtStation owns exactly its committed directional station slot.
+- Arrival converts the train's own reservation into same-direction occupancy
+  atomically, releases its track, and starts fresh dwell at elapsed zero.
+- Correct velocity for physical state, moving direction consistent with its
+  selected adjacent-index track, and elapsed below positive travel duration.
+
+Verify owned, pure snapshots with unchanged schema/order, retained old snapshots,
+and frequent versus sparse observations. Ready remains the stopped post-dwell
+state; add no Blocked physical state or observation-driven side effects. Audit
+sections 3–14 for architectural constraints and exclusions as well as behavioral
+requirements, including derived ownership without a persistent registry, no new
+public fixture APIs, and safety without fairness or guaranteed progress. Fix only
+demonstrated contract defects; add no abstractions solely for test structure.
+
+**Review stop:** Every section 15 acceptance scenario and all safety invariants are
+demonstrated. The selected SPEC-003 contract is semantically complete, with no new
+architectural mechanism introduced by this checkpoint.
+
+### Checkpoint 6 — Compatibility and full regression verification
+
+Preserve the five-station scenario's directional-capacity timing from section 16,
+including its existing 732/735/736 assertions, uncontended automatic timing,
+existing manual-control semantics, and snapshot ordering/purity. Verify that Bevy
+tests remain unchanged and no Bevy behavior or presentation logic was modified.
+Confirm no SPEC-001/SPEC-002 behavior changed beyond SPEC-003's explicit amendments.
+
+Run:
+
+```text
+cargo test -p metro-core
+cargo test --workspace
+```
+
+Fix only demonstrated regressions against the selected contracts.
+
+**Review stop:** All SPEC-003 acceptance tests and compatible historical core/Bevy
+regressions pass. No unresolved SPEC-003 implementation work remains; explicitly
+deferred and out-of-scope features remain outside this slice.
+
+### Coverage across review stops
+
+| Existing contract / acceptance scenarios | Checkpoints proving completion |
+| --- | --- |
+| Resource model, derivation, initial ownership and minimum constructor rejection (sections 5–6, 13; Initial ownership) | 1, 5 |
+| Shared departure mechanics, selection, timing, command validation (sections 3, 7, 10–11) | 2, 3, 4, 6 |
+| Single-candidate admission, manual atomicity/no buffering, blocked reversal (sections 7, 10–11; Occupied same-direction slot, Manual no buffering, Blocked reversal) | 3 for manual admission; 4 for automatic behavior; 5 for complete traces |
+| Frozen-world arbitration, Ready retry, determinism (section 9; Terminal contention, Reversed storage order, Conga, Automatic retry) | 4 |
+| Arrival lifecycle and directional independence (sections 5, 8, 11; Opposite-direction coexistence, Independent reverse tracks, Reservation and arrival, No source-slot transfer) | 5 |
+| Serial command ordering and observation contract (sections 10, 12; Serial command ordering, Observation independence) | 5, 6 |
+| All boundary invariants, architectural constraints and scope exclusions (sections 3–14) | 5 |
+| Migration, compatibility and full regression verification (section 16) | 6 |
+
+This sequence assigns every normative requirement and section 15 acceptance
+scenario to at least one checkpoint. Completion of Checkpoint 6 leaves no uncovered
+SPEC-003 requirement; it does not expand the selected contract or its scope.
 
 Review sections 5 (directional capacity), 11 (turnaround abstraction), 9 (frozen
 starting world), 15 (terminal contention), and 6/13 (initial ownership and invariants)

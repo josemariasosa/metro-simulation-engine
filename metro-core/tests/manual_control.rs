@@ -405,11 +405,12 @@ fn command_rejections_preserve_all_trains_and_timers() {
     let a = network.add_station("A");
     let b = network.add_station("B");
     let isolated = network.add_station("Isolated");
+    let unrelated = network.add_station("Unrelated");
     network.connect_bidirectional(a, b, 10);
     let trains = vec![
         Train::new(TrainId(10), 100, a, Direction::Forward),
         Train::new_manual(TrainId(20), 100, isolated, Direction::Forward),
-        Train::new_manual(TrainId(30), 100, a, Direction::Forward),
+        Train::new_manual(TrainId(30), 100, unrelated, Direction::Forward),
     ];
     let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
     for steps in 0..=3 {

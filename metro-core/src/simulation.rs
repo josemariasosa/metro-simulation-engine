@@ -1,9 +1,11 @@
 use crate::command::{CommandError, TrainCommand};
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
+use crate::resource::ResourceView;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Train, TrainControl, TrainState};
+use crate::train::{AtStationState, Direction, Train, TrainControl, TrainId, TrainState};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub struct Simulation {
@@ -31,6 +33,12 @@ fn dwelling_snapshot_state(
 
 impl Simulation {
     pub fn new(network: Network, trains: Vec<Train>, dwell_policy: DwellPolicy) -> Self {
+        let mut ids = HashSet::new();
+        for train in &trains {
+            assert!(ids.insert(train.id), "duplicate TrainId");
+        }
+        let _ = ResourceView::derive(&trains);
+
         Self {
             elapsed_seconds: 0,
             network,
@@ -262,6 +270,7 @@ impl Simulation {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::moving_train;
     use crate::train::{Direction, Train, TrainId, TrainState};
 
     use super::*;
@@ -287,6 +296,140 @@ mod tests {
                 dwell_policy: DwellPolicy::new(),
             }
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate TrainId")]
+    fn simulation_rejects_duplicate_train_ids() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            Train::new(TrainId(42), 100, a, Direction::Forward),
+            Train::new(TrainId(42), 100, b, Direction::Forward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    #[should_panic(expected = "station slot already occupied")]
+    fn simulation_rejects_duplicate_station_slot_occupancy() {
+        let SimulationFixture {
+            network,
+            stations: [_a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            Train::new(TrainId(1), 100, b, Direction::Forward),
+            Train::new(TrainId(2), 100, b, Direction::Forward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    #[should_panic(expected = "directed track already occupied")]
+    fn simulation_rejects_duplicate_directed_track_occupancy() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            moving_train(1, a, b, Direction::Forward),
+            moving_train(2, a, b, Direction::Forward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    #[should_panic(expected = "directed track already occupied")]
+    fn simulation_rejects_duplicate_destination_reservations() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        // In this linear topology, competing valid reservations also share a track.
+        // The private reservation test above isolates the reservation conflict.
+        let trains = vec![
+            moving_train(1, a, b, Direction::Forward),
+            moving_train(2, a, b, Direction::Forward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    #[should_panic(expected = "station slot occupied and reserved")]
+    fn simulation_rejects_occupied_and_reserved_slot() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            Train::new(TrainId(1), 100, b, Direction::Forward),
+            moving_train(2, a, b, Direction::Forward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    #[should_panic(expected = "station slot occupied and reserved")]
+    fn simulation_rejects_reserved_and_occupied_slot() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            moving_train(2, a, b, Direction::Forward),
+            Train::new(TrainId(1), 100, b, Direction::Forward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    fn simulation_accepts_opposite_station_slots() {
+        let SimulationFixture {
+            network,
+            stations: [_a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            Train::new(TrainId(1), 100, b, Direction::Forward),
+            Train::new(TrainId(2), 100, b, Direction::Backward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    fn simulation_accepts_opposite_directed_tracks() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, _c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            moving_train(1, a, b, Direction::Forward),
+            moving_train(2, b, a, Direction::Backward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
+    }
+
+    #[test]
+    fn simulation_accepts_opposite_destination_reservations() {
+        let SimulationFixture {
+            network,
+            stations: [a, b, c],
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let trains = vec![
+            moving_train(1, a, b, Direction::Forward),
+            moving_train(2, c, b, Direction::Backward),
+        ];
+        Simulation::new(network, trains, dwell_policy);
     }
 
     /// Default scenario: one train dwelling at A, with a ten-second track to B.
