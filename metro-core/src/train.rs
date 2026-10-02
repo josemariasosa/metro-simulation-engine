@@ -112,6 +112,57 @@ impl Train {
             elapsed_seconds: 0,
         };
     }
+
+    pub(crate) fn arrive_at(&mut self, station: StationId, dwell_seconds: u64) {
+        self.state = TrainState::AtStation {
+            station,
+            state: AtStationState::Dwelling {
+                elapsed_seconds: 0,
+                dwell_seconds,
+            },
+        };
+        self.velocity = 0;
+    }
+
+    pub(crate) fn advance_movement(
+        &mut self,
+        from: StationId,
+        to: StationId,
+        elapsed_seconds: u64,
+    ) {
+        self.state = TrainState::Moving {
+            from,
+            to,
+            elapsed_seconds: elapsed_seconds + 1,
+        };
+    }
+
+    pub(crate) fn advance_dwell(
+        &mut self,
+        station: StationId,
+        elapsed_seconds: u64,
+        dwell_seconds: u64,
+    ) {
+        if elapsed_seconds + 1 < dwell_seconds {
+            self.state = TrainState::AtStation {
+                station,
+                state: AtStationState::Dwelling {
+                    elapsed_seconds: elapsed_seconds + 1,
+                    dwell_seconds,
+                },
+            };
+        } else {
+            self.state = TrainState::AtStation {
+                station,
+                state: AtStationState::Ready,
+            };
+            self.velocity = 0;
+        }
+    }
+
+    pub(crate) fn is_manual_control(&self) -> bool {
+        self.control == TrainControl::Manual
+    }
 }
 
 #[cfg(test)]

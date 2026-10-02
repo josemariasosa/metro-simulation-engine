@@ -61,7 +61,7 @@ impl Simulation {
                     .ok_or(CommandError::UnknownTrain)?;
                 let train = &self.trains[index];
 
-                if train.control != TrainControl::Manual {
+                if !train.is_manual_control() {
                     return Err(CommandError::NotManual);
                 }
 
@@ -142,21 +142,7 @@ impl Simulation {
                 elapsed_seconds,
                 dwell_seconds,
             } => {
-                if elapsed_seconds + 1 < dwell_seconds {
-                    train.state = TrainState::AtStation {
-                        station,
-                        state: AtStationState::Dwelling {
-                            elapsed_seconds: elapsed_seconds + 1,
-                            dwell_seconds,
-                        },
-                    };
-                } else {
-                    train.state = TrainState::AtStation {
-                        station,
-                        state: AtStationState::Ready,
-                    };
-                    train.velocity = 0;
-                }
+                train.advance_dwell(station, elapsed_seconds, dwell_seconds);
             }
             AtStationState::Ready => {
                 // Intentionally no train-state change while waiting for input.
@@ -173,22 +159,12 @@ impl Simulation {
         elapsed_seconds: u64,
     ) {
         let track = network.track(from, to).expect("TRACK_NOT_FOUND");
+
         if elapsed_seconds + 1 >= track.travel_seconds {
             let dwell_seconds = dwell_policy.dwell_seconds(to, train);
-            train.state = TrainState::AtStation {
-                station: to,
-                state: AtStationState::Dwelling {
-                    elapsed_seconds: 0,
-                    dwell_seconds,
-                },
-            };
-            train.velocity = 0;
+            train.arrive_at(to, dwell_seconds);
         } else {
-            train.state = TrainState::Moving {
-                from,
-                to,
-                elapsed_seconds: elapsed_seconds + 1,
-            };
+            train.advance_movement(from, to, elapsed_seconds);
         }
     }
 
