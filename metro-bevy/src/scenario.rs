@@ -2,9 +2,10 @@ use bevy::prelude::{App, Resource};
 use metro_core::dwell::DwellPolicy;
 use metro_core::network::Network;
 use metro_core::simulation::Simulation;
+use metro_core::simulation::TrainId;
 use metro_core::snapshot::SimulationSnapshot;
 use metro_core::station::StationId;
-use metro_core::train::{Direction, Train, TrainId};
+use metro_core::train::{Direction, Train};
 
 #[derive(Resource)]
 pub(super) struct CoreSimulation(pub(super) Simulation);
@@ -36,9 +37,9 @@ pub(super) fn initialize_scenario(app: &mut App) {
     network.connect_bidirectional(b, c, 3);
     network.connect_bidirectional(c, d, 3);
 
-    let player_id = TrainId(0);
-    let train = Train::new_manual(player_id, 100, a, Direction::Forward, 3);
-    let simulation = Simulation::new(network, vec![train], DwellPolicy::new());
+    let train = Train::new_manual(100, a, Direction::Forward, 3);
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let player_id = simulation.add_train(train);
     let snapshot = simulation.snapshot();
 
     app.insert_resource(CoreSimulation(simulation))
@@ -112,8 +113,8 @@ mod tests {
         let core_train = simulation
             .trains()
             .iter()
-            .find(|train| train.id() == player_id)
+            .find(|train| train.id == player_id)
             .expect("configured player must be owned by the simulation");
-        assert_eq!(core_train.capacity(), 100);
+        assert_eq!(core_train.train.capacity(), 100);
     }
 }

@@ -1,7 +1,8 @@
 use bevy::prelude::*;
+use metro_core::simulation::TrainId;
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use metro_core::station::StationId;
-use metro_core::train::{Direction, TrainId};
+use metro_core::train::Direction;
 
 use crate::scenario::{LatestSnapshot, PlayerTrain, ScenarioStations};
 

@@ -1,7 +1,8 @@
 use crate::domain::resource::ResourceView;
 use crate::network::Network;
+use crate::simulation::TrainId;
 use crate::station::StationId;
-use crate::train::{Direction, TrainId};
+use crate::train::Direction;
 
 pub(crate) struct DepartureCandidate {
     pub(crate) from: StationId,
@@ -56,7 +57,7 @@ pub(crate) fn can_admit_departure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::utils::moving_train;
+    use crate::test_utils::utils::moving_train_entity;
 
     // Synthetic claims isolate each guard; real moving trains claim both resources.
     fn candidate() -> DepartureCandidate {
@@ -70,7 +71,7 @@ mod tests {
     #[test]
     fn reserved_destination_alone_rejects_departure() {
         let candidate = candidate();
-        let reservation = moving_train(1, StationId(2), candidate.to, candidate.direction);
+        let reservation = moving_train_entity(1, StationId(2), candidate.to, candidate.direction);
         let resources = ResourceView::derive(&[reservation]);
 
         assert!(resources.track_available(candidate.from, candidate.to));
@@ -81,7 +82,7 @@ mod tests {
     #[test]
     fn occupied_track_alone_rejects_departure() {
         let candidate = candidate();
-        let track_occupant = moving_train(
+        let track_occupant = moving_train_entity(
             1,
             candidate.from,
             candidate.to,

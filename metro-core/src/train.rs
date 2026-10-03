@@ -1,9 +1,6 @@
 use crate::{domain::departure::DepartureCandidate, station::StationId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TrainId(pub usize);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
     Forward,
     Backward,
@@ -48,7 +45,6 @@ pub enum AtStationState {
 
 #[derive(Debug, Clone)]
 pub struct Train {
-    id: TrainId,
     capacity: usize,
     state: TrainState,
     direction: Direction,
@@ -58,14 +54,12 @@ pub struct Train {
 
 impl Train {
     pub fn new(
-        id: TrainId,
         capacity: usize,
         station: StationId,
         direction: Direction,
         initial_dwell_seconds: u64,
     ) -> Self {
         Self {
-            id,
             capacity,
             state: TrainState::AtStation {
                 station,
@@ -81,14 +75,12 @@ impl Train {
     }
 
     pub fn new_manual(
-        id: TrainId,
         capacity: usize,
         station: StationId,
         direction: Direction,
         initial_dwell_seconds: u64,
     ) -> Self {
         Self {
-            id,
             capacity,
             state: TrainState::AtStation {
                 station,
@@ -101,10 +93,6 @@ impl Train {
             control: TrainControl::Manual,
             velocity: 0,
         }
-    }
-
-    pub fn id(&self) -> TrainId {
-        self.id
     }
 
     pub fn capacity(&self) -> usize {
@@ -233,10 +221,6 @@ impl Train {
     pub(crate) fn set_direction_for_test(&mut self, direction: Direction) {
         self.direction = direction;
     }
-
-    pub(crate) fn set_id_for_test(&mut self, id: TrainId) {
-        self.id = id;
-    }
 }
 
 #[cfg(test)]
@@ -248,7 +232,7 @@ mod tests {
 
     #[test]
     fn train_uses_requested_initial_dwell() {
-        let train = Train::new(TrainId(0), 100, StationId(0), Direction::Forward, 7);
+        let train = Train::new(100, StationId(0), Direction::Forward, 7);
 
         assert_eq!(
             train.state,
@@ -267,7 +251,6 @@ mod tests {
         let station = StationId(0);
 
         let train = Train::new(
-            TrainId(0),
             100,
             station,
             Direction::Forward,
@@ -304,7 +287,6 @@ mod tests {
         network.connect_bidirectional(station_a, station_b, 60);
 
         let mut train = Train::new(
-            TrainId(0),
             100,
             station_a,
             Direction::Forward,
@@ -323,7 +305,7 @@ mod tests {
         simulation.step();
 
         assert_eq!(
-            simulation.trains()[0].state,
+            simulation.trains()[0].train.state,
             TrainState::Moving {
                 from: station_a,
                 to: station_b,
@@ -337,7 +319,6 @@ mod tests {
         let station = StationId(0);
 
         let train = Train::new(
-            TrainId(0),
             100,
             station,
             Direction::Forward,
@@ -359,7 +340,6 @@ mod tests {
     #[test]
     fn new_train_is_automatic() {
         let train = Train::new(
-            TrainId(0),
             100,
             StationId(0),
             Direction::Forward,
@@ -372,7 +352,6 @@ mod tests {
     #[test]
     fn new_train_starts_stopped() {
         let train = Train::new(
-            TrainId(0),
             100,
             StationId(0),
             Direction::Forward,
@@ -387,7 +366,6 @@ mod tests {
         let station = StationId(0);
 
         let train = Train::new_manual(
-            TrainId(0),
             100,
             station,
             Direction::Forward,

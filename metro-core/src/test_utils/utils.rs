@@ -1,21 +1,24 @@
 use crate::domain::resource::{ResourceView, StationSlot};
 use crate::dwell::DwellPolicy;
+use crate::simulation::{TrainEntity, TrainId};
 use crate::station::StationId;
-use crate::train::{Direction, Train, TrainId, TrainState};
+use crate::train::{Direction, Train, TrainState};
 use std::collections::HashMap;
 
 /// Checks committed state without taking an observation, including in sparse-observation runs.
 pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
-    let mut ids = std::collections::HashSet::new();
     let mut occupants = Vec::new();
     let mut reservations = Vec::new();
     let mut tracks = Vec::new();
-    for train in sim.trains() {
-        assert!(ids.insert(train.id()), "duplicate TrainId");
+    for TrainEntity {
+        id: train_id,
+        train,
+    } in sim.trains()
+    {
         match train.state() {
             TrainState::AtStation { station, .. } => {
                 assert_eq!(train.velocity(), 0);
-                occupants.push((station, train.direction(), train.id()));
+                occupants.push((station, train.direction(), *train_id));
             }
             TrainState::Moving {
                 from,
@@ -33,8 +36,8 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
                     .expect("existing movement track");
                 assert!(track.travel_seconds > 0);
                 assert!(elapsed_seconds < track.travel_seconds);
-                tracks.push((from, to, train.id()));
-                reservations.push((to, train.direction(), train.id()));
+                tracks.push((from, to, *train_id));
+                reservations.push((to, train.direction(), *train_id));
             }
         }
     }
@@ -44,7 +47,7 @@ pub(crate) fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
 }
 
 pub(crate) fn assert_claims(
-    trains: &[Train],
+    trains: &[TrainEntity],
     occupants: &[(StationId, Direction, TrainId)],
     reservations: &[(StationId, Direction, TrainId)],
     tracks: &[(StationId, StationId, TrainId)],
@@ -77,14 +80,21 @@ pub(crate) fn assert_claims(
     assert_eq!(actual.track_occupants, expected_tracks);
 }
 
-pub fn moving_train(id: usize, from: StationId, to: StationId, direction: Direction) -> Train {
-    let mut train = Train::new(
-        TrainId(id),
-        100,
-        from,
-        direction,
-        DwellPolicy::default_dwell_seconds(),
-    );
+pub(crate) fn moving_train(from: StationId, to: StationId, direction: Direction) -> Train {
+    let mut train = Train::new(100, from, direction, DwellPolicy::default_dwell_seconds());
     train.set_moving_for_test(from, to, 0);
     train
+}
+
+/// Explicit ownership belongs only in tests of derived resource claims.
+pub(crate) fn moving_train_entity(
+    id: usize,
+    from: StationId,
+    to: StationId,
+    direction: Direction,
+) -> TrainEntity {
+    TrainEntity {
+        id: TrainId(id),
+        train: moving_train(from, to, direction),
+    }
 }

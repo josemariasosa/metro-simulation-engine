@@ -1,5 +1,6 @@
+use crate::simulation::{TrainEntity, TrainId};
 use crate::station::StationId;
-use crate::train::{Direction, Train, TrainId, TrainState};
+use crate::train::{Direction, TrainState};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,9 +40,17 @@ impl ResourceView {
         self.station_reservations.insert(slot, owner);
     }
 
-    pub(crate) fn derive(trains: &[Train]) -> Self {
+    pub(crate) fn derive(trains: &[TrainEntity]) -> Self {
+        Self::derive_iter(trains.iter())
+    }
+
+    pub(crate) fn derive_iter<'a>(trains: impl IntoIterator<Item = &'a TrainEntity>) -> Self {
         let mut view = Self::default();
-        for train in trains {
+        for TrainEntity {
+            id: train_id,
+            train,
+        } in trains
+        {
             match train.state() {
                 TrainState::AtStation { station, .. } => {
                     let slot = StationSlot {
@@ -56,20 +65,20 @@ impl ResourceView {
                         !view.station_occupants.contains_key(&slot),
                         "station slot already occupied"
                     );
-                    view.station_occupants.insert(slot, train.id());
+                    view.station_occupants.insert(slot, *train_id);
                 }
                 TrainState::Moving { from, to, .. } => {
                     assert!(
                         !view.track_occupants.contains_key(&(from, to)),
                         "directed track already occupied"
                     );
-                    view.track_occupants.insert((from, to), train.id());
+                    view.track_occupants.insert((from, to), *train_id);
                     view.reserve_station(
                         StationSlot {
                             station: to,
                             direction: train.direction(),
                         },
-                        train.id(),
+                        *train_id,
                     );
                 }
             }
@@ -83,8 +92,8 @@ mod tests {
     use super::*;
     use crate::dwell::DwellPolicy;
     use crate::network::Network;
-    use crate::test_utils::utils::moving_train;
-    use crate::train::AtStationState;
+    use crate::test_utils::utils::moving_train_entity;
+    use crate::train::{AtStationState, Train};
 
     #[test]
     fn availability_checks_track_occupancy_and_both_slot_claims() {
@@ -94,18 +103,21 @@ mod tests {
         assert!(empty.track_available(a, b));
         assert!(empty.station_slot_available(b, Direction::Forward));
 
-        let occupied = ResourceView::derive(&[Train::new(
-            TrainId(1),
-            100,
-            b,
-            Direction::Forward,
-            DwellPolicy::default_dwell_seconds(),
-        )]);
+        let trains = &[TrainEntity {
+            id: TrainId(1),
+            train: Train::new(
+                100,
+                b,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+        }];
+        let occupied = ResourceView::derive(trains);
         assert!(occupied.track_available(a, b));
         assert!(!occupied.station_slot_available(b, Direction::Forward));
         assert!(occupied.station_slot_available(b, Direction::Backward));
 
-        let reserved = ResourceView::derive(&[moving_train(1, a, b, Direction::Forward)]);
+        let reserved = ResourceView::derive(&[moving_train_entity(1, a, b, Direction::Forward)]);
         assert!(!reserved.track_available(a, b));
         assert!(reserved.track_available(b, a));
         assert!(!reserved.station_slot_available(b, Direction::Forward));
@@ -130,7 +142,6 @@ mod tests {
                 (a, b, Direction::Forward)
             };
             let train = Train::new_manual(
-                TrainId(1),
                 100,
                 from,
                 Direction::Forward,
@@ -138,28 +149,27 @@ mod tests {
             );
             // A reversal must not require the opposite source slot to be free.
             let other = Train::new_manual(
-                TrainId(2),
                 100,
                 from,
                 Direction::Backward,
                 DwellPolicy::default_dwell_seconds(),
             );
-            let mut simulation = Simulation::new(network, vec![train, other], DwellPolicy::new());
+            let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+            let train_id = simulation.add_train(train);
+            let other_id = simulation.add_train(other);
             let before = ResourceView::derive(simulation.trains());
             let source = StationSlot {
                 station: from,
                 direction: Direction::Forward,
             };
-            assert_eq!(before.station_occupants.get(&source), Some(&TrainId(1)));
+            assert_eq!(before.station_occupants.get(&source), Some(&train_id));
 
             simulation
-                .apply_command(TrainCommand::Accelerate {
-                    train_id: TrainId(1),
-                })
+                .apply_command(TrainCommand::Accelerate { train_id: train_id })
                 .unwrap();
 
             assert_eq!(simulation.elapsed_seconds, 0);
-            let train = &simulation.trains()[0];
+            let TrainEntity { id: _, train } = &simulation.trains()[0];
             assert_eq!(train.direction(), direction);
             assert_eq!(train.velocity(), 1);
             assert_eq!(
@@ -179,12 +189,12 @@ mod tests {
                         station: from,
                         direction: Direction::Backward
                     },
-                    TrainId(2)
+                    other_id
                 ),])
             );
             assert_eq!(
                 after.track_occupants,
-                HashMap::from([((from, to), TrainId(1))])
+                HashMap::from([((from, to), train_id)])
             );
             assert_eq!(
                 after.station_reservations,
@@ -193,7 +203,7 @@ mod tests {
                         station: to,
                         direction
                     },
-                    TrainId(1)
+                    train_id
                 ),])
             );
         }
@@ -209,20 +219,24 @@ mod tests {
         network.connect_bidirectional(b, c, 2);
 
         let trains = vec![
-            Train::new(
-                TrainId(1),
-                100,
-                b,
-                Direction::Forward,
-                DwellPolicy::default_dwell_seconds(),
-            ),
-            Train::new(
-                TrainId(2),
-                100,
-                b,
-                Direction::Backward,
-                DwellPolicy::default_dwell_seconds(),
-            ),
+            TrainEntity {
+                id: TrainId(1),
+                train: Train::new(
+                    100,
+                    b,
+                    Direction::Forward,
+                    DwellPolicy::default_dwell_seconds(),
+                ),
+            },
+            TrainEntity {
+                id: TrainId(2),
+                train: Train::new(
+                    100,
+                    b,
+                    Direction::Backward,
+                    DwellPolicy::default_dwell_seconds(),
+                ),
+            },
         ];
         let forward_slot = StationSlot {
             station: b,
@@ -250,23 +264,28 @@ mod tests {
     #[should_panic(expected = "station slot already occupied")]
     fn resource_view_rejects_duplicate_station_occupants() {
         let train = Train::new(
-            TrainId(1),
             100,
             StationId(0),
             Direction::Forward,
             DwellPolicy::default_dwell_seconds(),
         );
-        let mut other = train.clone();
-        other.set_id_for_test(TrainId(2));
-        ResourceView::derive(&[train, other]);
+        let first = TrainEntity {
+            id: TrainId(1),
+            train: train.clone(),
+        };
+        let other = TrainEntity {
+            id: TrainId(2),
+            train: train,
+        };
+        ResourceView::derive(&[first, other]);
     }
 
     #[test]
     #[should_panic(expected = "directed track already occupied")]
     fn resource_view_rejects_duplicate_track_occupants() {
         ResourceView::derive(&[
-            moving_train(1, StationId(0), StationId(1), Direction::Forward),
-            moving_train(2, StationId(0), StationId(1), Direction::Forward),
+            moving_train_entity(1, StationId(0), StationId(1), Direction::Forward),
+            moving_train_entity(2, StationId(0), StationId(1), Direction::Forward),
         ]);
     }
 
@@ -286,27 +305,34 @@ mod tests {
     #[should_panic(expected = "station slot occupied and reserved")]
     fn resource_view_rejects_reserving_occupied_slot() {
         let stopped = Train::new(
-            TrainId(1),
             100,
             StationId(1),
             Direction::Forward,
             DwellPolicy::default_dwell_seconds(),
         );
-        let moving = moving_train(2, StationId(0), StationId(1), Direction::Forward);
-        ResourceView::derive(&[stopped, moving]);
+        let moving = moving_train_entity(2, StationId(0), StationId(1), Direction::Forward);
+        ResourceView::derive(&[
+            TrainEntity {
+                id: TrainId(1),
+                train: stopped,
+            },
+            moving,
+        ]);
     }
 
     #[test]
     #[should_panic(expected = "station slot occupied and reserved")]
     fn resource_view_rejects_occupying_reserved_slot() {
-        let stopped = Train::new(
-            TrainId(1),
-            100,
-            StationId(1),
-            Direction::Forward,
-            DwellPolicy::default_dwell_seconds(),
-        );
-        let moving = moving_train(2, StationId(0), StationId(1), Direction::Forward);
+        let stopped = TrainEntity {
+            id: TrainId(1),
+            train: Train::new(
+                100,
+                StationId(1),
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            ),
+        };
+        let moving = moving_train_entity(2, StationId(0), StationId(1), Direction::Forward);
         ResourceView::derive(&[moving, stopped]);
     }
 
@@ -319,28 +345,34 @@ mod tests {
                 dwell_seconds: 3,
             },
         ] {
-            let mut forward = Train::new(
-                TrainId(1),
-                100,
-                StationId(1),
-                Direction::Forward,
-                DwellPolicy::default_dwell_seconds(),
-            );
+            let mut forward = TrainEntity {
+                id: TrainId(1),
+                train: Train::new(
+                    100,
+                    StationId(1),
+                    Direction::Forward,
+                    DwellPolicy::default_dwell_seconds(),
+                ),
+            };
             match state {
                 AtStationState::Ready => {
-                    forward.set_ready_for_test(StationId(1));
+                    forward.train.set_ready_for_test(StationId(1));
                 }
                 AtStationState::Dwelling {
                     elapsed_seconds: _,
                     dwell_seconds,
                 } => {
-                    forward.set_dwell_for_test(StationId(1), dwell_seconds);
+                    forward
+                        .train
+                        .set_dwell_for_test(StationId(1), dwell_seconds);
                 }
             }
 
-            let mut backward = forward.clone();
-            backward.set_id_for_test(TrainId(2));
-            backward.set_direction_for_test(Direction::Backward);
+            let mut backward = TrainEntity {
+                id: TrainId(2),
+                train: forward.train.clone(),
+            };
+            backward.train.set_direction_for_test(Direction::Backward);
             let view = ResourceView::derive(&[forward, backward]);
             for (direction, id) in [
                 (Direction::Forward, TrainId(1)),
@@ -362,7 +394,7 @@ mod tests {
 
     #[test]
     fn moving_train_occupies_track_and_reserves_destination_slot() {
-        let view = ResourceView::derive(&[moving_train(
+        let view = ResourceView::derive(&[moving_train_entity(
             1,
             StationId(0),
             StationId(1),

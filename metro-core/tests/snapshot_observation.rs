@@ -1,16 +1,16 @@
 use metro_core::dwell::DwellPolicy;
 use metro_core::network::Network;
-use metro_core::simulation::Simulation;
+use metro_core::simulation::{Simulation, TrainId};
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use metro_core::station::StationId;
-use metro_core::train::{Direction, Train, TrainId};
+use metro_core::train::{Direction, Train};
 
 fn test_simulation(travel_seconds: u64) -> Simulation {
     let mut network = Network::new();
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, travel_seconds);
-    let train = Train::new(TrainId(0), 100, a, Direction::Forward, 3);
+    let train = Train::new(100, a, Direction::Forward, 3);
     Simulation::new(network, vec![train], DwellPolicy::new())
 }
 
@@ -122,7 +122,7 @@ fn snapshot_represents_ready_manual_train() {
     let station_a = network.add_station("A");
     let station_b = network.add_station("B");
     network.connect_bidirectional(station_a, station_b, 6);
-    let train = Train::new_manual(TrainId(0), 100, station_a, Direction::Forward, 3);
+    let train = Train::new_manual(100, station_a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
 
     for _ in 0..3 {
@@ -246,8 +246,8 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
     network.add_track(a, b, 6);
     network.add_track(b, a, 4);
     let trains = vec![
-        Train::new(TrainId(9), 100, b, Direction::Backward, 3),
-        Train::new(TrainId(2), 100, a, Direction::Forward, 3),
+        Train::new(100, b, Direction::Backward, 3),
+        Train::new(100, a, Direction::Forward, 3),
     ];
     let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
     for _ in 0..3 {
@@ -260,7 +260,7 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
             elapsed_seconds: 3,
             trains: vec![
                 TrainSnapshot {
-                    id: TrainId(9),
+                    id: TrainId(0),
                     direction: Direction::Backward,
                     velocity: 1,
                     state: TrainSnapshotState::Moving {
@@ -271,7 +271,7 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
                     },
                 },
                 TrainSnapshot {
-                    id: TrainId(2),
+                    id: TrainId(1),
                     direction: Direction::Forward,
                     velocity: 1,
                     state: TrainSnapshotState::Moving {
