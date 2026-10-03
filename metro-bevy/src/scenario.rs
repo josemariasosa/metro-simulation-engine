@@ -112,8 +112,8 @@ mod tests {
         let core_train = simulation
             .trains()
             .iter()
-            .find(|train| train.id == player_id)
+            .find(|train| train.id() == player_id)
             .expect("configured player must be owned by the simulation");
-        assert_eq!(core_train.capacity, 100);
+        assert_eq!(core_train.capacity(), 100);
     }
 }

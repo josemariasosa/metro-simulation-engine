@@ -58,7 +58,7 @@ fn assert_order(sim: &Simulation, ids: &[usize]) {
     assert_eq!(
         sim.trains()
             .iter()
-            .map(|train| train.id.0)
+            .map(|train| train.id().0)
             .collect::<Vec<_>>(),
         ids
     );
@@ -85,7 +85,7 @@ fn conga_freezes_starting_ownership_in_both_storage_orders() {
         if reversed {
             trains.reverse();
         }
-        let order = trains.iter().map(|train| train.id.0).collect::<Vec<_>>();
+        let order = trains.iter().map(|train| train.id().0).collect::<Vec<_>>();
         let mut sim = Simulation::new(network, trains, DwellPolicy::new());
         let mut trace = Vec::new();
         let expected = [
@@ -134,7 +134,7 @@ fn conga_freezes_starting_ownership_in_both_storage_orders() {
         let t3 = sim
             .trains()
             .iter()
-            .find(|train| train.id == TrainId(3))
+            .find(|train| train.id() == TrainId(3))
             .unwrap();
         assert_eq!(
             t3.state(),
@@ -220,7 +220,7 @@ fn terminal_contention_uses_numeric_id_in_both_storage_orders() {
         if reversed {
             trains.reverse();
         }
-        let order = trains.iter().map(|train| train.id.0).collect::<Vec<_>>();
+        let order = trains.iter().map(|train| train.id().0).collect::<Vec<_>>();
         let mut sim = Simulation::new(network, trains, DwellPolicy::new());
         for _ in 0..3 {
             sim.step();

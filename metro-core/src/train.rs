@@ -48,8 +48,8 @@ pub enum AtStationState {
 
 #[derive(Debug, Clone)]
 pub struct Train {
-    pub id: TrainId,
-    pub capacity: usize,
+    id: TrainId,
+    capacity: usize,
     state: TrainState,
     direction: Direction,
     control: TrainControl,
@@ -101,6 +101,14 @@ impl Train {
             control: TrainControl::Manual,
             velocity: 0,
         }
+    }
+
+    pub fn id(&self) -> TrainId {
+        self.id
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 
     pub(crate) fn velocity(&self) -> u8 {
@@ -224,6 +232,10 @@ impl Train {
 
     pub(crate) fn set_direction_for_test(&mut self, direction: Direction) {
         self.direction = direction;
+    }
+
+    pub(crate) fn set_id_for_test(&mut self, id: TrainId) {
+        self.id = id;
     }
 }
 

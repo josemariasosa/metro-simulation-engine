@@ -38,7 +38,7 @@ impl Simulation {
     pub fn new(network: Network, trains: Vec<Train>, dwell_policy: DwellPolicy) -> Self {
         let mut ids = HashSet::new();
         for train in &trains {
-            assert!(ids.insert(train.id), "duplicate TrainId");
+            assert!(ids.insert(train.id()), "duplicate TrainId");
         }
         let _ = ResourceView::derive(&trains);
 
@@ -57,7 +57,7 @@ impl Simulation {
                 let index = self
                     .trains
                     .iter()
-                    .position(|train| train.id == train_id)
+                    .position(|train| train.id() == train_id)
                     .ok_or(CommandError::UnknownTrain)?;
                 let train = &self.trains[index];
 
@@ -96,7 +96,7 @@ impl Simulation {
 
     fn snapshot_train(&self, train: &Train) -> TrainSnapshot {
         TrainSnapshot {
-            id: train.id,
+            id: train.id(),
             direction: train.direction(),
             velocity: train.velocity(),
             state: self.snapshot_train_state(&train.state()),
@@ -190,7 +190,7 @@ impl Simulation {
             if eligible {
                 proposals.push(AutomaticDepartureProposal {
                     train_index,
-                    train_id: train.id,
+                    train_id: train.id(),
                     candidate: select_departure_candidate(
                         &self.network,
                         station,
@@ -288,8 +288,8 @@ mod tests {
         assert_eq!(simulation.snapshot(), before);
         assert_eq!(simulation.trains.len(), trains.len());
         for (actual, expected) in simulation.trains.iter().zip(&trains) {
-            assert_eq!(actual.id, expected.id);
-            assert_eq!(actual.capacity, expected.capacity);
+            assert_eq!(actual.id(), expected.id());
+            assert_eq!(actual.capacity(), expected.capacity());
             assert_eq!(actual.is_manual_control(), expected.is_manual_control());
             assert_eq!(
                 actual.is_automatic_control(),
@@ -857,8 +857,8 @@ mod tests {
         assert_eq!(candidate.from, c);
         assert_eq!(candidate.to, b);
         assert_eq!(candidate.direction, Direction::Backward);
-        assert_eq!(train.id, before.id);
-        assert_eq!(train.capacity, before.capacity);
+        assert_eq!(train.id(), before.id());
+        assert_eq!(train.capacity(), before.capacity());
         assert_eq!(train.is_manual_control(), before.is_manual_control());
         assert_eq!(train.is_automatic_control(), before.is_automatic_control());
         assert_eq!(train.state(), before.state());
@@ -867,8 +867,8 @@ mod tests {
 
         train.apply_departure(candidate);
 
-        assert_eq!(train.id, before.id);
-        assert_eq!(train.capacity, before.capacity);
+        assert_eq!(train.id(), before.id());
+        assert_eq!(train.capacity(), before.capacity());
         assert_eq!(train.is_manual_control(), before.is_manual_control());
         assert_eq!(train.is_automatic_control(), before.is_automatic_control());
         assert_eq!(train.direction(), Direction::Backward);

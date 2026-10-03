@@ -61,8 +61,8 @@ fn assert_world(sim: &Simulation, time: u64, trains: &[Train]) {
     assert_eq!(sim.elapsed_seconds, time);
     assert_eq!(sim.trains().len(), trains.len());
     for (actual, expected) in sim.trains().iter().zip(trains) {
-        assert_eq!(actual.id, expected.id);
-        assert_eq!(actual.capacity, expected.capacity);
+        assert_eq!(actual.id(), expected.id());
+        assert_eq!(actual.capacity(), expected.capacity());
         assert_eq!(actual.is_manual_control(), expected.is_manual_control());
         assert_eq!(
             actual.is_automatic_control(),
@@ -79,7 +79,7 @@ fn command(sim: &mut Simulation, id: usize, expected: Result<(), CommandError>) 
     let before = sim.trains().to_vec();
     let already_moving = before
         .iter()
-        .any(|t| t.id == TrainId(id) && matches!(t.state(), TrainState::Moving { .. }));
+        .any(|t| t.id() == TrainId(id) && matches!(t.state(), TrainState::Moving { .. }));
     assert_eq!(
         sim.apply_command(TrainCommand::Accelerate {
             train_id: TrainId(id)
@@ -94,7 +94,7 @@ fn command(sim: &mut Simulation, id: usize, expected: Result<(), CommandError>) 
 }
 
 fn train(sim: &Simulation, id: usize) -> &Train {
-    sim.trains().iter().find(|t| t.id == TrainId(id)).unwrap()
+    sim.trains().iter().find(|t| t.id() == TrainId(id)).unwrap()
 }
 
 fn moving(sim: &Simulation, id: usize, from: usize, to: usize, elapsed: u64) {
@@ -333,7 +333,10 @@ fn blocked_reversal_retains_direction_until_accepted_departure() {
 }
 
 fn assert_order(sim: &Simulation, order: &[TrainId]) {
-    assert_eq!(sim.trains().iter().map(|t| t.id).collect::<Vec<_>>(), order);
+    assert_eq!(
+        sim.trains().iter().map(|t| t.id()).collect::<Vec<_>>(),
+        order
+    );
     assert_eq!(
         sim.snapshot()
             .trains
@@ -357,7 +360,7 @@ fn conga_and_terminal_contention_are_independent_of_observation_and_storage_orde
             if reversed {
                 initial.reverse();
             }
-            let order = initial.iter().map(|t| t.id).collect::<Vec<_>>();
+            let order = initial.iter().map(|t| t.id()).collect::<Vec<_>>();
             let n = if conga { 4 } else { 2 };
             let mut frequent = line(n, initial.clone());
             let mut sparse = line(n, initial);

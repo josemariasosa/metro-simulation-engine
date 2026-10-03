@@ -384,7 +384,14 @@ fn assert_command_unchanged(
     let domain_before: Vec<_> = simulation
         .trains()
         .iter()
-        .map(|train| (train.id, train.capacity, train.state(), train.direction()))
+        .map(|train| {
+            (
+                train.id(),
+                train.capacity(),
+                train.state(),
+                train.direction(),
+            )
+        })
         .collect();
     assert_eq!(
         simulation.apply_command(TrainCommand::Accelerate { train_id }),
@@ -394,7 +401,14 @@ fn assert_command_unchanged(
     let domain_after: Vec<_> = simulation
         .trains()
         .iter()
-        .map(|train| (train.id, train.capacity, train.state(), train.direction()))
+        .map(|train| {
+            (
+                train.id(),
+                train.capacity(),
+                train.state(),
+                train.direction(),
+            )
+        })
         .collect();
     assert_eq!(domain_after, domain_before);
 }
@@ -603,11 +617,11 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
         assert_eq!(after.elapsed_seconds, before.elapsed_seconds);
         assert_eq!(after.trains[0], before.trains[0]);
         let other_after = &simulation.trains()[0];
-        assert_eq!(other_after.id, other_before.id);
-        assert_eq!(other_after.capacity, other_before.capacity);
+        assert_eq!(other_after.id(), other_before.id());
+        assert_eq!(other_after.capacity(), other_before.capacity());
         assert_eq!(other_after.state(), other_before.state());
-        assert_eq!(simulation.trains()[1].id, target_before.id);
-        assert_eq!(simulation.trains()[1].capacity, target_before.capacity);
+        assert_eq!(simulation.trains()[1].id(), target_before.id());
+        assert_eq!(simulation.trains()[1].capacity(), target_before.capacity());
         assert_eq!(after.trains[1].direction, expected_direction);
         assert_eq!(after.trains[1].velocity, 1);
         // The unfinished dwell is replaced, and no traversal second is consumed.

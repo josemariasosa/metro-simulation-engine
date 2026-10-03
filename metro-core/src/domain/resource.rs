@@ -56,20 +56,20 @@ impl ResourceView {
                         !view.station_occupants.contains_key(&slot),
                         "station slot already occupied"
                     );
-                    view.station_occupants.insert(slot, train.id);
+                    view.station_occupants.insert(slot, train.id());
                 }
                 TrainState::Moving { from, to, .. } => {
                     assert!(
                         !view.track_occupants.contains_key(&(from, to)),
                         "directed track already occupied"
                     );
-                    view.track_occupants.insert((from, to), train.id);
+                    view.track_occupants.insert((from, to), train.id());
                     view.reserve_station(
                         StationSlot {
                             station: to,
                             direction: train.direction(),
                         },
-                        train.id,
+                        train.id(),
                     );
                 }
             }
@@ -257,7 +257,7 @@ mod tests {
             DwellPolicy::default_dwell_seconds(),
         );
         let mut other = train.clone();
-        other.id = TrainId(2);
+        other.set_id_for_test(TrainId(2));
         ResourceView::derive(&[train, other]);
     }
 
@@ -339,7 +339,7 @@ mod tests {
             }
 
             let mut backward = forward.clone();
-            backward.id = TrainId(2);
+            backward.set_id_for_test(TrainId(2));
             backward.set_direction_for_test(Direction::Backward);
             let view = ResourceView::derive(&[forward, backward]);
             for (direction, id) in [

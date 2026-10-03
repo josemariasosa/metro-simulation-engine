@@ -74,8 +74,8 @@ fn trains_start_at_opposite_endpoints_in_opposite_directions() {
     let simulation = Simulation::new(network, trains, dwell_policy);
 
     assert_eq!(simulation.trains().len(), 2);
-    assert_eq!(simulation.trains()[0].id, TrainId(0));
-    assert_eq!(simulation.trains()[1].id, TrainId(1));
+    assert_eq!(simulation.trains()[0].id(), TrainId(0));
+    assert_eq!(simulation.trains()[1].id(), TrainId(1));
 
     assert_eq!(simulation.trains()[0].direction(), Direction::Forward);
     assert_train_dwelling_at(&simulation.trains()[0].state(), &a);
