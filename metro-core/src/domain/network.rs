@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::domain::station::{Station, StationId};
+use crate::domain::track::Track;
 use crate::domain::train::Direction;
-use crate::station::{Station, StationId};
-pub use crate::track::Track;
 
 #[derive(Debug, Default)]
 pub struct Network {

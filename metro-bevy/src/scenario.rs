@@ -1,10 +1,10 @@
 use bevy::prelude::{App, Resource};
+use metro_core::Network;
+use metro_core::StationId;
 use metro_core::dwell::DwellPolicy;
-use metro_core::network::Network;
 use metro_core::simulation::Simulation;
 use metro_core::simulation::TrainId;
 use metro_core::snapshot::SimulationSnapshot;
-use metro_core::station::StationId;
 use metro_core::{Direction, Train};
 
 #[derive(Resource)]

@@ -3,12 +3,12 @@ use std::collections::HashSet;
 use crate::command::{CommandError, TrainCommand};
 use crate::domain::departure::{AutomaticDepartureDecision, AutomaticDepartureProposal};
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
+use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
+use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Train, TrainState};
 use crate::dwell::DwellPolicy;
-use crate::network::Network;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
-use crate::station::StationId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TrainId(pub usize);

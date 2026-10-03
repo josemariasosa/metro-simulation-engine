@@ -1,4 +1,4 @@
-use crate::{domain::departure::DepartureCandidate, station::StationId};
+use crate::domain::{departure::DepartureCandidate, station::StationId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
@@ -226,8 +226,9 @@ impl Train {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::domain::network::Network;
     use crate::dwell::DwellPolicy;
-    use crate::network::Network;
     use crate::simulation::Simulation;
 
     #[test]

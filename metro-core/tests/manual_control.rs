@@ -1,9 +1,9 @@
+use metro_core::Network;
+use metro_core::StationId;
 use metro_core::command::{CommandError, TrainCommand};
 use metro_core::dwell::DwellPolicy;
-use metro_core::network::Network;
 use metro_core::simulation::{Simulation, TrainEntity, TrainId};
 use metro_core::snapshot::TrainSnapshotState;
-use metro_core::station::StationId;
 use metro_core::{AtStationState, Direction, Train, TrainState};
 
 fn manual_a_b_simulation() -> Simulation {

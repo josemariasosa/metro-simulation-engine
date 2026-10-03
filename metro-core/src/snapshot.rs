@@ -1,6 +1,6 @@
+use crate::domain::station::StationId;
 use crate::domain::train::Direction;
 use crate::simulation::TrainId;
-use crate::station::StationId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationSnapshot {
@@ -36,7 +36,7 @@ pub enum TrainSnapshotState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::station::StationId;
+    use crate::domain::station::StationId;
 
     #[test]
     fn snapshot_dtos_are_owned_and_comparable() {

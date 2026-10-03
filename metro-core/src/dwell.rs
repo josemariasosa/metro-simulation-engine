@@ -1,5 +1,5 @@
+use crate::domain::station::StationId;
 use crate::domain::train::Train;
-use crate::station::StationId;
 
 #[derive(Debug, Default, Clone)]
 pub struct DwellPolicy;

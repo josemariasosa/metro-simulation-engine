@@ -1,4 +1,4 @@
-use crate::station::StationId;
+use crate::domain::station::StationId;
 
 #[derive(Debug)]
 pub struct Track {

@@ -3,6 +3,6 @@ pub struct StationId(pub usize);
 
 #[derive(Debug)]
 pub struct Station {
-    pub id: StationId,
-    pub name: String,
+    pub(crate) id: StationId,
+    pub(crate) name: String,
 }

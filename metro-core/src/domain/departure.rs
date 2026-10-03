@@ -1,8 +1,8 @@
+use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
+use crate::domain::station::StationId;
 use crate::domain::train::Direction;
-use crate::network::Network;
 use crate::simulation::TrainId;
-use crate::station::StationId;
 
 pub(crate) struct DepartureCandidate {
     pub(crate) from: StationId,

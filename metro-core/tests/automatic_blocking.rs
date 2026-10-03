@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
+use metro_core::Network;
+use metro_core::StationId;
 use metro_core::command::TrainCommand;
 use metro_core::dwell::DwellPolicy;
-use metro_core::network::Network;
 use metro_core::simulation::{Simulation, TrainId};
 use metro_core::snapshot::{TrainSnapshot, TrainSnapshotState};
-use metro_core::station::StationId;
 use metro_core::{Direction, Train};
 
 fn line<const N: usize>(names: [&str; N]) -> (Network, [StationId; N]) {

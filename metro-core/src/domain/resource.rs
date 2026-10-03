@@ -1,6 +1,6 @@
+use crate::domain::station::StationId;
 use crate::domain::train::{Direction, TrainState};
 use crate::simulation::{TrainEntity, TrainId};
-use crate::station::StationId;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -90,9 +90,10 @@ impl ResourceView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::domain::network::Network;
     use crate::domain::train::{AtStationState, Train};
     use crate::dwell::DwellPolicy;
-    use crate::network::Network;
     use crate::test_utils::utils::moving_train_entity;
 
     #[test]

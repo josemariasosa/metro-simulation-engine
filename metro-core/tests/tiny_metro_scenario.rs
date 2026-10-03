@@ -1,7 +1,7 @@
+use metro_core::Network;
+use metro_core::StationId;
 use metro_core::dwell::DwellPolicy;
-use metro_core::network::Network;
 use metro_core::simulation::{Simulation, TrainId};
-use metro_core::station::StationId;
 use metro_core::{AtStationState, Direction, Train, TrainState};
 
 fn build_tiny_metro_network() -> (Network, [StationId; 5]) {

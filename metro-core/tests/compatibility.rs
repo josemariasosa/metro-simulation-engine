@@ -1,4 +1,4 @@
-use metro_core::network::{Network, Track};
+use metro_core::{Network, Track};
 
 #[test]
 fn legacy_network_track_path_remains_compatible_with_network_lookups() {
@@ -13,7 +13,7 @@ fn legacy_network_track_path_remains_compatible_with_network_lookups() {
     network.add_track(configured.from, configured.to, configured.travel_seconds);
 
     let legacy: &Track = network.track(a, b).unwrap();
-    let relocated: &metro_core::track::Track = legacy;
+    let relocated: &Track = legacy;
     assert_eq!(relocated.from, a);
     assert_eq!(relocated.to, b);
     assert_eq!(relocated.travel_seconds, 2);

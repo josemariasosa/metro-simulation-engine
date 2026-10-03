@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
+use crate::domain::network::Network;
+use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Direction, Train, TrainState};
 use crate::dwell::DwellPolicy;
-use crate::network::Network;
 use crate::simulation::{Simulation, TrainId};
 use crate::snapshot::{TrainSnapshot, TrainSnapshotState};
-use crate::station::StationId;
 
 fn line<const N: usize>(names: [&str; N]) -> (Network, [StationId; N]) {
     let mut network = Network::new();
