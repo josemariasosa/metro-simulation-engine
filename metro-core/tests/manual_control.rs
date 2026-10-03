@@ -1,7 +1,7 @@
+use metro_core::DwellPolicy;
 use metro_core::Network;
 use metro_core::StationId;
 use metro_core::command::{CommandError, TrainCommand};
-use metro_core::dwell::DwellPolicy;
 use metro_core::simulation::{Simulation, TrainEntity, TrainId};
 use metro_core::snapshot::TrainSnapshotState;
 use metro_core::{AtStationState, Direction, Train, TrainState};

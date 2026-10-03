@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use crate::command::{CommandError, TrainCommand};
 use crate::domain::departure::{AutomaticDepartureDecision, AutomaticDepartureProposal};
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
+use crate::domain::dwell::DwellPolicy;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Train, TrainState};
-use crate::dwell::DwellPolicy;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

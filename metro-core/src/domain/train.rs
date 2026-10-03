@@ -227,8 +227,8 @@ impl Train {
 mod tests {
     use super::*;
 
+    use crate::domain::dwell::DwellPolicy;
     use crate::domain::network::Network;
-    use crate::dwell::DwellPolicy;
     use crate::simulation::Simulation;
 
     #[test]

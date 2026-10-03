@@ -91,9 +91,9 @@ impl ResourceView {
 mod tests {
     use super::*;
 
+    use crate::domain::dwell::DwellPolicy;
     use crate::domain::network::Network;
     use crate::domain::train::{AtStationState, Train};
-    use crate::dwell::DwellPolicy;
     use crate::test_utils::utils::moving_train_entity;
 
     #[test]
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn admitted_departure_rederives_exact_ownership_including_reversal() {
         use crate::command::TrainCommand;
-        use crate::dwell::DwellPolicy;
+        use crate::domain::dwell::DwellPolicy;
         use crate::simulation::Simulation;
 
         for reverse in [false, true] {

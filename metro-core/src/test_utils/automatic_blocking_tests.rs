@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
+use crate::domain::dwell::DwellPolicy;
 use crate::domain::network::Network;
 use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Direction, Train, TrainState};
-use crate::dwell::DwellPolicy;
 use crate::simulation::{Simulation, TrainId};
 use crate::snapshot::{TrainSnapshot, TrainSnapshotState};
 

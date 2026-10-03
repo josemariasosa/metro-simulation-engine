@@ -1,7 +1,7 @@
 use bevy::prelude::{App, Resource};
+use metro_core::DwellPolicy;
 use metro_core::Network;
 use metro_core::StationId;
-use metro_core::dwell::DwellPolicy;
 use metro_core::simulation::Simulation;
 use metro_core::simulation::TrainId;
 use metro_core::snapshot::SimulationSnapshot;

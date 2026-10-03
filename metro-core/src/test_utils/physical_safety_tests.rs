@@ -1,10 +1,10 @@
 //! SPEC-003 checkpoint 5: all assertions concern completed transaction boundaries.
 use crate::command::{CommandError, TrainCommand};
+use crate::domain::dwell::DwellPolicy;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Direction, Train, TrainState};
-use crate::dwell::DwellPolicy;
 use crate::simulation::{Simulation, TrainEntity, TrainId};
 use crate::test_utils::utils::{assert_claims, assert_physical_invariants};
 

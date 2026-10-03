@@ -1,7 +1,7 @@
+use crate::domain::dwell::DwellPolicy;
 use crate::domain::resource::{ResourceView, StationSlot};
 use crate::domain::station::StationId;
 use crate::domain::train::{Direction, Train, TrainState};
-use crate::dwell::DwellPolicy;
 use crate::simulation::{TrainEntity, TrainId};
 use std::collections::HashMap;
 
