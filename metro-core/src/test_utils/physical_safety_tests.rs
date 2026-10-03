@@ -195,7 +195,10 @@ fn reservation_is_exclusive_through_traversal_without_readmission() {
         &[],
         &[],
     );
-    assert!(ResourceView::derive(sim.trains()).track_available(b, a));
+    assert!(
+        ResourceView::derive(sim.trains().iter().map(|entity| (entity.id, &entity.train)))
+            .track_available(b, a)
+    );
     // Now only destination occupancy can reject the command: the track is free.
     command(&mut sim, 1, Err(CommandError::Blocked));
 }

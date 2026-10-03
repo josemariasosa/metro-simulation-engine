@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::command::{CommandError, TrainCommand};
-use crate::domain::departure::{AutomaticDepartureDecision, AutomaticDepartureProposal};
+use crate::domain::departure::DepartureCandidate;
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
 use crate::domain::dwell::DwellPolicy;
 use crate::domain::network::Network;
@@ -18,6 +18,18 @@ pub struct TrainId(pub usize);
 pub struct TrainEntity {
     pub id: TrainId,
     pub train: Train,
+}
+
+struct AutomaticDepartureProposal {
+    train_index: usize,
+    train_id: TrainId,
+    candidate: DepartureCandidate,
+}
+
+enum AutomaticDepartureDecision {
+    NotEligible,
+    Accepted(DepartureCandidate),
+    Rejected { station: StationId },
 }
 
 #[derive(Debug)]
@@ -74,7 +86,12 @@ impl Simulation {
             .expect("train ID space exhausted");
 
         let train_entity = TrainEntity { id, train };
-        ResourceView::derive_iter(self.trains.iter().chain(std::iter::once(&train_entity)));
+        ResourceView::derive(
+            self.trains
+                .iter()
+                .chain(std::iter::once(&train_entity))
+                .map(|entity| (entity.id, &entity.train)),
+        );
         self.next_train_id = next_train_id;
         self.trains.push(train_entity);
 
@@ -103,7 +120,9 @@ impl Simulation {
                 let candidate =
                     select_departure_candidate(&self.network, station, train.direction())
                         .ok_or(CommandError::NoOutgoingTrack)?;
-                let resources = ResourceView::derive(&self.trains);
+                let resources = ResourceView::derive(
+                    self.trains.iter().map(|entity| (entity.id, &entity.train)),
+                );
                 if !can_admit_departure(&candidate, &resources) {
                     return Err(CommandError::Blocked);
                 }
@@ -203,7 +222,8 @@ impl Simulation {
 
     pub fn step(&mut self) {
         // World N stays immutable until every automatic departure is resolved.
-        let starting_resources = ResourceView::derive(&self.trains);
+        let starting_resources =
+            ResourceView::derive(self.trains.iter().map(|entity| (entity.id, &entity.train)));
         let mut proposals = Vec::new();
         for (train_index, train_entity) in self.trains.iter().enumerate() {
             let TrainEntity {
@@ -316,8 +336,100 @@ impl Simulation {
 mod tests {
     use super::*;
 
+    use crate::domain::resource::StationSlot;
     use crate::domain::train::Direction;
     use crate::test_utils::utils::moving_train;
+    use std::collections::HashMap;
+
+    #[test]
+    fn admitted_departure_rederives_exact_ownership_including_reversal() {
+        for reverse in [false, true] {
+            let mut network = Network::new();
+            let a = network.add_station("A");
+            let b = network.add_station("B");
+            network.connect_bidirectional(a, b, 2);
+            let (from, to, direction) = if reverse {
+                (b, a, Direction::Backward)
+            } else {
+                (a, b, Direction::Forward)
+            };
+            let train = Train::new_manual(
+                100,
+                from,
+                Direction::Forward,
+                DwellPolicy::default_dwell_seconds(),
+            );
+            // A reversal must not require the opposite source slot to be free.
+            let other = Train::new_manual(
+                100,
+                from,
+                Direction::Backward,
+                DwellPolicy::default_dwell_seconds(),
+            );
+            let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+            let train_id = simulation.add_train(train);
+            let other_id = simulation.add_train(other);
+            let before = ResourceView::derive(
+                simulation
+                    .trains()
+                    .iter()
+                    .map(|entity| (entity.id, &entity.train)),
+            );
+            let source = StationSlot {
+                station: from,
+                direction: Direction::Forward,
+            };
+            assert_eq!(before.station_occupants.get(&source), Some(&train_id));
+
+            simulation
+                .apply_command(TrainCommand::Accelerate { train_id })
+                .unwrap();
+
+            assert_eq!(simulation.elapsed_seconds, 0);
+            let TrainEntity { id: _, train } = &simulation.trains()[0];
+            assert_eq!(train.direction(), direction);
+            assert_eq!(train.velocity(), 1);
+            assert_eq!(
+                train.state(),
+                TrainState::Moving {
+                    from,
+                    to,
+                    elapsed_seconds: 0
+                }
+            );
+            let after = ResourceView::derive(
+                simulation
+                    .trains()
+                    .iter()
+                    .map(|entity| (entity.id, &entity.train)),
+            );
+            assert!(!after.station_occupants.contains_key(&source));
+            assert_eq!(
+                after.station_occupants,
+                HashMap::from([(
+                    StationSlot {
+                        station: from,
+                        direction: Direction::Backward
+                    },
+                    other_id
+                ),])
+            );
+            assert_eq!(
+                after.track_occupants,
+                HashMap::from([((from, to), train_id)])
+            );
+            assert_eq!(
+                after.station_reservations,
+                HashMap::from([(
+                    StationSlot {
+                        station: to,
+                        direction
+                    },
+                    train_id
+                ),])
+            );
+        }
+    }
 
     #[test]
     fn registration_allocates_ids_and_keeps_them_after_reordering_and_removal() {
@@ -366,7 +478,12 @@ mod tests {
             }
         );
         assert_eq!(simulation.snapshot().trains[1], before.trains[1]);
-        let resources = ResourceView::derive(simulation.trains());
+        let resources = ResourceView::derive(
+            simulation
+                .trains()
+                .iter()
+                .map(|entity| (entity.id, &entity.train)),
+        );
         assert_eq!(resources.track_occupants.get(&(b, c)), Some(&second_id));
 
         simulation.trains.clear();
@@ -404,7 +521,12 @@ mod tests {
     fn assert_blocked_unchanged(simulation: &mut Simulation, train_id: TrainId) {
         let before = simulation.snapshot();
         let trains = simulation.trains.clone();
-        let resources = ResourceView::derive(&simulation.trains);
+        let resources = ResourceView::derive(
+            simulation
+                .trains
+                .iter()
+                .map(|entity| (entity.id, &entity.train)),
+        );
         assert_eq!(
             simulation.apply_command(TrainCommand::Accelerate { train_id }),
             Err(CommandError::Blocked)
@@ -431,7 +553,15 @@ mod tests {
             assert_eq!(actual.direction(), expected.direction());
             assert_eq!(actual.velocity(), expected.velocity());
         }
-        assert_eq!(ResourceView::derive(&simulation.trains), resources);
+        assert_eq!(
+            ResourceView::derive(
+                simulation
+                    .trains
+                    .iter()
+                    .map(|entity| (entity.id, &entity.train))
+            ),
+            resources
+        );
     }
 
     #[test]
@@ -450,7 +580,12 @@ mod tests {
         let mut blocker = moving_train(a, b, Direction::Forward);
         blocker.set_moving_for_test(a, b, 4);
         let mut simulation = Simulation::new(network, vec![train, blocker], dwell_policy);
-        let resources = ResourceView::derive(simulation.trains());
+        let resources = ResourceView::derive(
+            simulation
+                .trains()
+                .iter()
+                .map(|entity| (entity.id, &entity.train)),
+        );
         assert!(!resources.track_available(a, b));
         assert!(!resources.station_slot_available(b, Direction::Forward));
         let train_id = simulation.trains()[0].id;
@@ -566,7 +701,12 @@ mod tests {
                 elapsed_seconds: 0,
             }
         );
-        ResourceView::derive(simulation.trains());
+        ResourceView::derive(
+            simulation
+                .trains()
+                .iter()
+                .map(|entity| (entity.id, &entity.train)),
+        );
     }
 
     #[test]
@@ -586,7 +726,12 @@ mod tests {
             moving_train(b, c, Direction::Forward),
         ];
         let mut simulation = Simulation::new(network, trains, dwell_policy);
-        let resources = ResourceView::derive(simulation.trains());
+        let resources = ResourceView::derive(
+            simulation
+                .trains()
+                .iter()
+                .map(|entity| (entity.id, &entity.train)),
+        );
         let reverse =
             select_departure_candidate(&simulation.network, b, Direction::Backward).unwrap();
         assert_eq!(reverse.to, a);
@@ -638,7 +783,12 @@ mod tests {
             );
             assert_eq!(simulation.trains()[0].train.direction(), Direction::Forward);
             assert_eq!(simulation.trains()[0].train.velocity(), 1);
-            ResourceView::derive(simulation.trains());
+            ResourceView::derive(
+                simulation
+                    .trains()
+                    .iter()
+                    .map(|entity| (entity.id, &entity.train)),
+            );
         }
     }
 

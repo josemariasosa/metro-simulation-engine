@@ -74,7 +74,7 @@ pub(crate) fn assert_claims(
     for &(from, to, owner) in tracks {
         assert!(expected_tracks.insert((from, to), owner).is_none());
     }
-    let actual = ResourceView::derive(trains);
+    let actual = ResourceView::derive(trains.iter().map(|entity| (entity.id, &entity.train)));
     assert_eq!(actual.station_occupants, expected_occupants);
     assert_eq!(actual.station_reservations, expected_reservations);
     assert_eq!(actual.track_occupants, expected_tracks);
@@ -84,17 +84,4 @@ pub(crate) fn moving_train(from: StationId, to: StationId, direction: Direction)
     let mut train = Train::new(100, from, direction, DwellPolicy::default_dwell_seconds());
     train.set_moving_for_test(from, to, 0);
     train
-}
-
-/// Explicit ownership belongs only in tests of derived resource claims.
-pub(crate) fn moving_train_entity(
-    id: usize,
-    from: StationId,
-    to: StationId,
-    direction: Direction,
-) -> TrainEntity {
-    TrainEntity {
-        id: TrainId(id),
-        train: moving_train(from, to, direction),
-    }
 }
