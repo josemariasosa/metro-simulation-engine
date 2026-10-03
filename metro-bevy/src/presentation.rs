@@ -1,8 +1,8 @@
 use bevy::prelude::*;
+use metro_core::Direction;
 use metro_core::simulation::TrainId;
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use metro_core::station::StationId;
-use metro_core::train::Direction;
 
 use crate::scenario::{LatestSnapshot, PlayerTrain, ScenarioStations};
 
@@ -288,7 +288,7 @@ pub(super) fn setup_stations(mut commands: Commands, stations: Res<ScenarioStati
 mod tests {
     use super::*;
     use crate::scenario::ScenarioStation;
-    use metro_core::train::Direction;
+    use metro_core::Direction;
 
     fn spawn_test_train(app: &mut App, id: TrainId) -> (Entity, Entity, Entity) {
         let status = app.world_mut().spawn((TrainStatus, Text2d::new(""))).id();

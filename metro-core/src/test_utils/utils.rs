@@ -1,8 +1,8 @@
 use crate::domain::resource::{ResourceView, StationSlot};
+use crate::domain::train::{Direction, Train, TrainState};
 use crate::dwell::DwellPolicy;
 use crate::simulation::{TrainEntity, TrainId};
 use crate::station::StationId;
-use crate::train::{Direction, Train, TrainState};
 use std::collections::HashMap;
 
 /// Checks committed state without taking an observation, including in sparse-observation runs.

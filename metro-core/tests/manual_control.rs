@@ -4,7 +4,7 @@ use metro_core::network::Network;
 use metro_core::simulation::{Simulation, TrainEntity, TrainId};
 use metro_core::snapshot::TrainSnapshotState;
 use metro_core::station::StationId;
-use metro_core::train::{AtStationState, Direction, Train, TrainState};
+use metro_core::{AtStationState, Direction, Train, TrainState};
 
 fn manual_a_b_simulation() -> Simulation {
     manual_a_b_simulation_with_travel_seconds(10)

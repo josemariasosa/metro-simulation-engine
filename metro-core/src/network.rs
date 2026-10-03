@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::domain::train::Direction;
 use crate::station::{Station, StationId};
 pub use crate::track::Track;
-use crate::train::Direction;
 
 #[derive(Debug, Default)]
 pub struct Network {
@@ -83,7 +83,6 @@ impl Network {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::train::Direction;
 
     #[test]
     fn can_add_stations_to_network() {

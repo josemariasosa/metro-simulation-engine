@@ -1,6 +1,6 @@
+use crate::domain::train::Direction;
 use crate::simulation::TrainId;
 use crate::station::StationId;
-use crate::train::Direction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationSnapshot {

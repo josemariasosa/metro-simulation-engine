@@ -3,7 +3,7 @@ use metro_core::network::Network;
 use metro_core::simulation::{Simulation, TrainId};
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use metro_core::station::StationId;
-use metro_core::train::{Direction, Train};
+use metro_core::{Direction, Train};
 
 fn test_simulation(travel_seconds: u64) -> Simulation {
     let mut network = Network::new();

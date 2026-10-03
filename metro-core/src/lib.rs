@@ -6,7 +6,8 @@ pub mod simulation;
 pub mod snapshot;
 pub mod station;
 pub mod track;
-pub mod train;
 
 #[cfg(test)]
 pub mod test_utils;
+
+pub use domain::train::{AtStationState, Direction, Train, TrainControl, TrainState};

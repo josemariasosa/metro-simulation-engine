@@ -4,11 +4,11 @@ use crate::command::{CommandError, TrainCommand};
 use crate::domain::departure::{AutomaticDepartureDecision, AutomaticDepartureProposal};
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
 use crate::domain::resource::ResourceView;
+use crate::domain::train::{AtStationState, Train, TrainState};
 use crate::dwell::DwellPolicy;
 use crate::network::Network;
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 use crate::station::StationId;
-use crate::train::{AtStationState, Train, TrainState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TrainId(pub usize);
@@ -314,10 +314,10 @@ impl Simulation {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::utils::moving_train;
-    use crate::train::{Direction, Train, TrainState};
-
     use super::*;
+
+    use crate::domain::train::Direction;
+    use crate::test_utils::utils::moving_train;
 
     #[test]
     fn registration_allocates_ids_and_keeps_them_after_reordering_and_removal() {

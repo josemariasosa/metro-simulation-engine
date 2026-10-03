@@ -6,7 +6,7 @@ use metro_core::network::Network;
 use metro_core::simulation::{Simulation, TrainId};
 use metro_core::snapshot::{TrainSnapshot, TrainSnapshotState};
 use metro_core::station::StationId;
-use metro_core::train::{Direction, Train};
+use metro_core::{Direction, Train};
 
 fn line<const N: usize>(names: [&str; N]) -> (Network, [StationId; N]) {
     let mut network = Network::new();

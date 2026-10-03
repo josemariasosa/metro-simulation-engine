@@ -5,7 +5,7 @@ use metro_core::simulation::Simulation;
 use metro_core::simulation::TrainId;
 use metro_core::snapshot::SimulationSnapshot;
 use metro_core::station::StationId;
-use metro_core::train::{Direction, Train};
+use metro_core::{Direction, Train};
 
 #[derive(Resource)]
 pub(super) struct CoreSimulation(pub(super) Simulation);
