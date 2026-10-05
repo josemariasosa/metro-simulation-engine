@@ -14,3 +14,4 @@ pub use domain::network::Network;
 pub use domain::station::StationId;
 pub use domain::track::Track;
 pub use domain::train::{AtStationState, Direction, Train, TrainControl, TrainId, TrainState};
+pub use snapshot::ConstraintSnapshot;

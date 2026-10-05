@@ -250,7 +250,7 @@ fn future_constraints_over_claimed_resources_preserve_traversal() {
     for _ in 0..5 {
         plain.step();
         s.step();
-        assert_eq!(s.snapshot(), plain.snapshot());
+        assert_eq!(s.snapshot().trains, plain.snapshot().trains);
         assert_eq!(claims(&s), claims(&plain));
     }
     assert!(matches!(
@@ -316,7 +316,7 @@ fn constraint_origin_does_not_change_admission_or_claim_traces() {
             if manual {
                 assert_eq!(command(&mut planned), command(&mut injected));
             }
-            assert_eq!(planned.snapshot(), injected.snapshot());
+            assert_eq!(planned.snapshot().trains, injected.snapshot().trains);
             assert_eq!(claims(&planned), claims(&injected));
             planned.step();
             injected.step();
@@ -336,7 +336,7 @@ fn future_registration_preserves_present_admission() {
             s.step();
             plain.step();
         }
-        assert_eq!(s.snapshot(), plain.snapshot());
+        assert_eq!(s.snapshot().trains, plain.snapshot().trains);
         assert_eq!(claims(&s), claims(&plain));
     }
 }

@@ -471,6 +471,7 @@ mod tests {
                         },
                     ),
                 ],
+                constraints: vec![],
             }))
             .add_systems(Update, present_trains);
         let (root, status, body) = spawn_test_train(&mut app, TrainId(42));
@@ -497,6 +498,7 @@ mod tests {
             .insert_resource(LatestSnapshot(SimulationSnapshot {
                 elapsed_seconds: 0,
                 trains: vec![],
+                constraints: vec![],
             }))
             .add_systems(Update, present_trains);
         let (root, status, _) = spawn_test_train(&mut app, TrainId(42));
@@ -582,6 +584,7 @@ mod tests {
                         station: StationId(42),
                     },
                 )],
+                constraints: vec![],
             }))
             .add_systems(Update, (present_trains, bounce_train));
         let (root, _, body) = spawn_test_train(&mut app, TrainId(42));
@@ -788,6 +791,7 @@ mod tests {
         let mut snapshot = SimulationSnapshot {
             elapsed_seconds: 5,
             trains: vec![other(9), target.clone(), other(2)],
+            constraints: vec![],
         };
         assert_eq!(find_train_snapshot(&snapshot, target.id), Some(&target));
         snapshot.trains.rotate_left(2);

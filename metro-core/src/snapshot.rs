@@ -1,10 +1,22 @@
+use crate::domain::constraint::{ConstraintId, ConstraintOrigin, OperationalConstraint};
 use crate::domain::station::StationId;
 use crate::domain::train::Direction;
 use crate::domain::train::TrainId;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationSnapshot {
     pub elapsed_seconds: u64,
     pub trains: Vec<TrainSnapshot>,
+    pub constraints: Vec<ConstraintSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstraintSnapshot {
+    pub id: ConstraintId,
+    pub constraint: OperationalConstraint,
+    pub start_at: u64,
+    pub end_at: Option<u64>,
+    pub origin: ConstraintOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +62,7 @@ mod tests {
                     remaining_seconds: 3,
                 },
             }],
+            constraints: vec![],
         };
 
         let cloned = snapshot.clone();
@@ -84,6 +97,7 @@ mod tests {
         let snapshot = SimulationSnapshot {
             elapsed_seconds: 5,
             trains: vec![dwelling, moving],
+            constraints: vec![],
         };
 
         let copy = snapshot.clone();

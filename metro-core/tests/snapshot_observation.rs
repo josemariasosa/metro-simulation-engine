@@ -3,7 +3,10 @@ use metro_core::Network;
 use metro_core::StationId;
 use metro_core::simulation::Simulation;
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
-use metro_core::{Direction, Train, TrainId};
+use metro_core::{
+    ConstraintError, ConstraintOrigin, ConstraintSnapshot, Direction, OperationalConstraint, Train,
+    TrainId,
+};
 
 fn test_simulation(travel_seconds: u64) -> Simulation {
     let mut network = Network::new();
@@ -12,6 +15,18 @@ fn test_simulation(travel_seconds: u64) -> Simulation {
     network.connect_bidirectional(a, b, travel_seconds);
     let train = Train::new(100, a, Direction::Forward, 3);
     Simulation::new(network, vec![train], DwellPolicy::new())
+}
+
+fn no_train_simulation() -> (Simulation, StationId, StationId) {
+    let mut network = Network::new();
+    let a = network.add_station("A");
+    let b = network.add_station("B");
+    network.connect_bidirectional(a, b, 6);
+    (Simulation::new(network, vec![], DwellPolicy::new()), a, b)
+}
+
+fn track_constraint(from: StationId, to: StationId) -> OperationalConstraint {
+    OperationalConstraint::TrackUnavailable { from, to }
 }
 
 fn expected_snapshot(
@@ -27,6 +42,7 @@ fn expected_snapshot(
             state,
             velocity,
         }],
+        constraints: vec![],
     }
 }
 
@@ -95,6 +111,7 @@ fn snapshot_reports_empty_simulation() {
         SimulationSnapshot {
             elapsed_seconds: 1,
             trains: vec![],
+            constraints: vec![],
         }
     );
 }
@@ -282,8 +299,207 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
                     },
                 },
             ],
+            constraints: vec![],
         }
     );
+}
+
+#[test]
+fn empty_snapshot_has_no_constraints_and_no_train_simulation_can_observe_them() {
+    let (mut simulation, a, b) = no_train_simulation();
+    assert!(simulation.snapshot().constraints.is_empty());
+
+    let id = simulation
+        .create_constraint_at(track_constraint(a, b), 2, None, ConstraintOrigin::Planned)
+        .unwrap();
+    assert_eq!(simulation.snapshot().constraints[0].id, id);
+    simulation.step();
+    assert!(simulation.snapshot().elapsed_seconds < simulation.snapshot().constraints[0].start_at);
+    simulation.step();
+    assert_eq!(simulation.snapshot().constraints[0].start_at, 2);
+    assert_eq!(simulation.snapshot().elapsed_seconds, 2);
+    assert!(simulation.snapshot().trains.is_empty());
+}
+
+#[test]
+fn scheduled_and_active_records_are_visible_with_exact_fields_and_origin() {
+    let (mut simulation, a, b) = no_train_simulation();
+    let active_id = simulation
+        .create_constraint_at(
+            track_constraint(a, b),
+            1,
+            Some(4),
+            ConstraintOrigin::Planned,
+        )
+        .unwrap();
+    let scheduled_id = simulation
+        .create_constraint_at(track_constraint(a, b), 3, None, ConstraintOrigin::Injected)
+        .unwrap();
+
+    let before_start = simulation.snapshot();
+    assert_eq!(before_start.constraints.len(), 2);
+    assert_eq!(before_start, simulation.snapshot());
+    assert!(
+        before_start
+            .constraints
+            .iter()
+            .all(|record| { before_start.elapsed_seconds < record.start_at })
+    );
+
+    simulation.step();
+    let at_start = simulation.snapshot();
+    assert_eq!(at_start.elapsed_seconds, 1);
+    assert_eq!(
+        at_start.constraints,
+        vec![
+            ConstraintSnapshot {
+                id: active_id,
+                constraint: track_constraint(a, b),
+                start_at: 1,
+                end_at: Some(4),
+                origin: ConstraintOrigin::Planned,
+            },
+            ConstraintSnapshot {
+                id: scheduled_id,
+                constraint: track_constraint(a, b),
+                start_at: 3,
+                end_at: None,
+                origin: ConstraintOrigin::Injected,
+            },
+        ]
+    );
+    assert!(at_start.elapsed_seconds >= at_start.constraints[0].start_at);
+    assert!(at_start.elapsed_seconds < at_start.constraints[0].end_at.unwrap());
+    assert!(at_start.elapsed_seconds < at_start.constraints[1].start_at);
+}
+
+#[test]
+fn finite_constraint_is_absent_at_end_boundary_after_normal_step() {
+    let (mut simulation, a, b) = no_train_simulation();
+    let id = simulation
+        .create_constraint_at(
+            track_constraint(a, b),
+            1,
+            Some(3),
+            ConstraintOrigin::Injected,
+        )
+        .unwrap();
+    for _ in 0..3 {
+        simulation.step();
+    }
+
+    assert_eq!(simulation.elapsed_seconds, 3);
+    assert!(simulation.snapshot().constraints.is_empty());
+    assert_eq!(
+        simulation.remove_constraint(id),
+        Err(ConstraintError::UnknownConstraint)
+    );
+}
+
+#[test]
+fn removing_scheduled_or_active_constraint_keeps_unrelated_records_observable() {
+    let (mut simulation, a, b) = no_train_simulation();
+    let scheduled = simulation
+        .create_constraint_at(track_constraint(a, b), 5, None, ConstraintOrigin::Planned)
+        .unwrap();
+    let active = simulation
+        .create_constraint_at(track_constraint(b, a), 1, None, ConstraintOrigin::Injected)
+        .unwrap();
+    let unrelated = simulation
+        .create_constraint_at(
+            OperationalConstraint::StationDeparturesBlocked { station: a },
+            7,
+            None,
+            ConstraintOrigin::Planned,
+        )
+        .unwrap();
+    simulation.step();
+
+    simulation.remove_constraint(scheduled).unwrap();
+    assert_eq!(
+        simulation
+            .snapshot()
+            .constraints
+            .iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![active, unrelated]
+    );
+    simulation.remove_constraint(active).unwrap();
+    assert_eq!(
+        simulation
+            .snapshot()
+            .constraints
+            .iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![unrelated]
+    );
+}
+
+#[test]
+fn duplicate_values_remain_distinct_and_indefinite_records_persist_until_removed() {
+    let (mut simulation, a, b) = no_train_simulation();
+    let value = track_constraint(a, b);
+    let first = simulation
+        .create_constraint_at(value, 1, Some(3), ConstraintOrigin::Planned)
+        .unwrap();
+    let second = simulation
+        .create_constraint_at(value, 2, None, ConstraintOrigin::Injected)
+        .unwrap();
+
+    simulation.step();
+    simulation.step();
+    let both_registered = simulation.snapshot();
+    assert_eq!(both_registered.constraints.len(), 2);
+    assert_eq!(both_registered.constraints[0].id, first);
+    assert_eq!(both_registered.constraints[1].id, second);
+    assert_eq!(both_registered.constraints[0].constraint, value);
+    assert_eq!(both_registered.constraints[1].constraint, value);
+    assert_eq!(both_registered.constraints[0].end_at, Some(3));
+    assert_eq!(both_registered.constraints[1].end_at, None);
+
+    simulation.remove_constraint(first).unwrap();
+    assert_eq!(simulation.snapshot().constraints.len(), 1);
+    assert_eq!(simulation.snapshot().constraints[0].id, second);
+
+    for _ in 0..3 {
+        simulation.step();
+    }
+    let snapshot = simulation.snapshot();
+    assert_eq!(snapshot.constraints.len(), 1);
+    assert_eq!(snapshot.constraints[0].id, second);
+    assert_eq!(snapshot.constraints[0].constraint, value);
+    assert_eq!(snapshot.constraints[0].end_at, None);
+    assert_eq!(snapshot.constraints[0].origin, ConstraintOrigin::Injected);
+
+    simulation.remove_constraint(second).unwrap();
+    assert!(simulation.snapshot().constraints.is_empty());
+}
+
+#[test]
+fn retained_and_mutated_snapshot_values_do_not_change_simulation() {
+    let mut simulation = test_simulation(6);
+    let (a, b) = (StationId(0), StationId(1));
+    let retained_id = simulation
+        .create_constraint_at(track_constraint(a, b), 8, None, ConstraintOrigin::Planned)
+        .unwrap();
+    let mut retained = simulation.snapshot();
+    let original = retained.clone();
+
+    simulation.step();
+    simulation.remove_constraint(retained_id).unwrap();
+    simulation
+        .create_constraint_at(track_constraint(b, a), 9, None, ConstraintOrigin::Injected)
+        .unwrap();
+    let later = simulation.snapshot();
+    assert_eq!(retained, original);
+    assert_ne!(retained, later);
+
+    retained.elapsed_seconds = u64::MAX;
+    retained.constraints.clear();
+    retained.trains.clear();
+    assert_eq!(simulation.snapshot(), later);
 }
 
 #[test]

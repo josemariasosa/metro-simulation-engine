@@ -12,7 +12,7 @@ use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Train, TrainId, TrainState};
-use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
+use crate::snapshot::{ConstraintSnapshot, SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 
 #[cfg(test)]
 mod cp5_tests;
@@ -250,8 +250,22 @@ impl Simulation {
         }
     }
 
-    /// Returns an owned observation of the current state in train vector order.
+    /// Returns an owned observation of the current state in train vector order and constraint ID order.
     pub fn snapshot(&self) -> SimulationSnapshot {
+        let mut constraints: Vec<_> = self
+            .constraints
+            .iter()
+            .filter(|record| !record.is_expired(self.elapsed_seconds))
+            .map(|record| ConstraintSnapshot {
+                id: record.id,
+                constraint: record.constraint,
+                start_at: record.start_at,
+                end_at: record.end_at,
+                origin: record.origin,
+            })
+            .collect();
+        constraints.sort_unstable_by_key(|constraint| constraint.id.0);
+
         SimulationSnapshot {
             elapsed_seconds: self.elapsed_seconds,
             trains: self
@@ -259,6 +273,7 @@ impl Simulation {
                 .iter()
                 .map(|train_entity| self.snapshot_train(train_entity))
                 .collect(),
+            constraints,
         }
     }
 
@@ -2288,7 +2303,8 @@ mod tests {
         assert_eq!(simulation.remove_constraint(active), Ok(()));
 
         assert!(simulation.constraints.is_empty());
-        assert_eq!(simulation.snapshot(), trains_before);
+        assert_eq!(simulation.snapshot().trains, trains_before.trains);
+        assert!(simulation.snapshot().constraints.is_empty());
         assert_eq!(
             simulation.remove_constraint(scheduled),
             Err(ConstraintError::UnknownConstraint)
@@ -2402,5 +2418,46 @@ mod tests {
             simulation.create_constraint_at(closed(a), 10, None, ConstraintOrigin::Planned),
             Ok(ConstraintId(3))
         );
+    }
+
+    #[test]
+    fn snapshot_sorts_constraint_ids_without_reordering_registry() {
+        let (mut simulation, [a, b, _]) = constraint_simulation();
+        let first = simulation
+            .create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
+            .unwrap();
+        let second = simulation
+            .create_constraint_at(closed(b), 6, None, ConstraintOrigin::Injected)
+            .unwrap();
+        let third = simulation
+            .create_constraint_at(closed(a), 7, Some(9), ConstraintOrigin::Planned)
+            .unwrap();
+        simulation.constraints.reverse();
+        let registry_before = simulation.constraints.clone();
+
+        let snapshot = simulation.snapshot();
+
+        assert_eq!(
+            snapshot
+                .constraints
+                .iter()
+                .map(|constraint| constraint.id)
+                .collect::<Vec<_>>(),
+            vec![first, second, third]
+        );
+        assert_eq!(simulation.constraints, registry_before);
+    }
+
+    #[test]
+    fn snapshot_omits_stale_expired_record_without_pruning_registry() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+        simulation
+            .create_constraint_at(closed(a), 5, Some(7), ConstraintOrigin::Planned)
+            .unwrap();
+        simulation.elapsed_seconds = 7;
+        let registry_before = simulation.constraints.clone();
+
+        assert!(simulation.snapshot().constraints.is_empty());
+        assert_eq!(simulation.constraints, registry_before);
     }
 }
