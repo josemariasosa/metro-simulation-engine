@@ -1,4 +1,4 @@
-use crate::domain::{departure::DepartureCandidate, station::StationId};
+use crate::domain::station::StationId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TrainId(pub usize);
@@ -114,12 +114,12 @@ impl Train {
         self.state
     }
 
-    pub(crate) fn apply_departure(&mut self, candidate: DepartureCandidate) {
-        self.direction = candidate.direction;
+    pub(crate) fn apply_departure(&mut self, from: StationId, to: StationId, direction: Direction) {
+        self.direction = direction;
         self.velocity = 1;
         self.state = TrainState::Moving {
-            from: candidate.from,
-            to: candidate.to,
+            from,
+            to,
             elapsed_seconds: 0,
         };
     }

@@ -123,7 +123,11 @@ impl Simulation {
                 if !can_admit_departure(&candidate, &resources) {
                     return Err(CommandError::Blocked);
                 }
-                self.trains[index].train.apply_departure(candidate);
+                self.trains[index].train.apply_departure(
+                    candidate.from,
+                    candidate.to,
+                    candidate.direction,
+                );
                 Ok(())
             }
         }
@@ -286,7 +290,7 @@ impl Simulation {
             let train = &mut train_entity.train;
             match decision {
                 AutomaticDepartureDecision::Accepted(candidate) => {
-                    train.apply_departure(candidate);
+                    train.apply_departure(candidate.from, candidate.to, candidate.direction);
                     continue;
                 }
                 AutomaticDepartureDecision::Rejected { station } => {
@@ -1105,7 +1109,7 @@ mod tests {
         assert_eq!(train.direction(), before.direction());
         assert_eq!(train.velocity(), before.velocity());
 
-        train.apply_departure(candidate);
+        train.apply_departure(candidate.from, candidate.to, candidate.direction);
 
         assert_eq!(train.capacity(), before.capacity());
         assert_eq!(train.is_manual_control(), before.is_manual_control());
