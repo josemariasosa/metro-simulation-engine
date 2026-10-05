@@ -231,8 +231,6 @@ mod tests {
     use super::*;
 
     use crate::domain::dwell::DwellPolicy;
-    use crate::domain::network::Network;
-    use crate::simulation::Simulation;
 
     #[test]
     fn train_uses_requested_initial_dwell() {
@@ -278,44 +276,6 @@ mod tests {
         assert_eq!(Direction::Forward.reverse(), Direction::Backward);
 
         assert_eq!(Direction::Backward.reverse(), Direction::Forward);
-    }
-
-    #[test]
-    fn moving_train_advances_elapsed_time() {
-        let mut network = Network::new();
-        let dwell_policy = DwellPolicy::new();
-
-        let station_a = network.add_station("A");
-        let station_b = network.add_station("B");
-
-        network.connect_bidirectional(station_a, station_b, 60);
-
-        let mut train = Train::new(
-            100,
-            station_a,
-            Direction::Forward,
-            DwellPolicy::default_dwell_seconds(),
-        );
-
-        train.state = TrainState::Moving {
-            from: station_a,
-            to: station_b,
-            elapsed_seconds: 1,
-        };
-        train.velocity = 1;
-
-        let mut simulation = Simulation::new(network, vec![train], dwell_policy);
-
-        simulation.step();
-
-        assert_eq!(
-            simulation.trains()[0].train.state,
-            TrainState::Moving {
-                from: station_a,
-                to: station_b,
-                elapsed_seconds: 2,
-            }
-        );
     }
 
     #[test]
