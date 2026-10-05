@@ -3,6 +3,40 @@ use std::collections::HashSet;
 use crate::domain::station::StationId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConstraintId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintOrigin {
+    Planned,
+    Injected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintError {
+    InvalidStart,
+    InvalidEnd,
+    TimeOverflow,
+    UnknownStation,
+    UnknownTrack,
+    IdExhausted,
+    UnknownConstraint,
+}
+
+struct ConstraintRecord {
+    id: ConstraintId,
+    constraint: OperationalConstraint,
+    start_at: u64,
+    end_at: Option<u64>,
+    origin: ConstraintOrigin,
+}
+
+impl ConstraintRecord {
+    fn is_active(&self, now: u64) -> bool {
+        self.start_at <= now && self.end_at.is_none_or(|end| now < end)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum OperationalConstraint {
     TrackUnavailable { from: StationId, to: StationId },
     StationDeparturesBlocked { station: StationId },
@@ -146,5 +180,24 @@ mod tests {
         assert!(!view.track_unavailable(a, b));
         assert!(!view.station_departures_blocked(a));
         assert!(!view.station_unavailable(a));
+    }
+
+    #[test]
+    fn constraint_record_is_active_only_inside_half_open_interval() {
+        let record = ConstraintRecord {
+            id: ConstraintId(0),
+            constraint: OperationalConstraint::TrackUnavailable {
+                from: StationId(0),
+                to: StationId(1),
+            },
+            start_at: 11,
+            end_at: Some(15),
+            origin: ConstraintOrigin::Planned,
+        };
+
+        assert!(!record.is_active(10));
+        assert!(record.is_active(11));
+        assert!(record.is_active(14));
+        assert!(!record.is_active(15));
     }
 }
