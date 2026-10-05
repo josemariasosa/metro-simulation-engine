@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::command::{CommandError, TrainCommand};
+use crate::domain::constraint::RestrictionView;
 use crate::domain::departure::DepartureCandidate;
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
 use crate::domain::dwell::DwellPolicy;
@@ -120,7 +121,8 @@ impl Simulation {
                 let resources = ResourceView::derive(
                     self.trains.iter().map(|entity| (entity.id, &entity.train)),
                 );
-                if !can_admit_departure(&candidate, &resources) {
+                let restrictions = RestrictionView::default();
+                if !can_admit_departure(&candidate, &resources, &restrictions) {
                     return Err(CommandError::Blocked);
                 }
                 self.trains[index].train.apply_departure(
@@ -225,6 +227,7 @@ impl Simulation {
         // World N stays immutable until every automatic departure is resolved.
         let starting_resources =
             ResourceView::derive(self.trains.iter().map(|entity| (entity.id, &entity.train)));
+        let restrictions = RestrictionView::default();
         let mut proposals = Vec::new();
         for (train_index, train_entity) in self.trains.iter().enumerate() {
             let TrainEntity {
@@ -271,7 +274,7 @@ impl Simulation {
             let track = (candidate.from, candidate.to);
             let slot = (candidate.to, candidate.direction);
             decisions[proposal.train_index] =
-                if can_admit_departure(&candidate, &starting_resources)
+                if can_admit_departure(&candidate, &starting_resources, &restrictions)
                     && !accepted_tracks.contains(&track)
                     && !accepted_destination_slots.contains(&slot)
                 {
@@ -733,10 +736,11 @@ mod tests {
                 .iter()
                 .map(|entity| (entity.id, &entity.train)),
         );
+        let restrictions = RestrictionView::default();
         let reverse =
             select_departure_candidate(&simulation.network, b, Direction::Backward).unwrap();
         assert_eq!(reverse.to, a);
-        assert!(can_admit_departure(&reverse, &resources));
+        assert!(can_admit_departure(&reverse, &resources, &restrictions));
         let train_id = simulation.trains()[0].id;
         assert_blocked_unchanged(&mut simulation, train_id);
     }

@@ -1,3 +1,4 @@
+use crate::domain::constraint::RestrictionView;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
@@ -36,15 +37,17 @@ pub(crate) fn select_departure_candidate(
 pub(crate) fn can_admit_departure<Owner: Copy>(
     candidate: &DepartureCandidate,
     resources: &ResourceView<Owner>,
+    restrictions: &RestrictionView,
 ) -> bool {
     resources.track_available(candidate.from, candidate.to)
         && resources.station_slot_available(candidate.to, candidate.direction)
+        && restrictions.permits_departure(candidate.from, candidate.to)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::utils::moving_train;
+    use crate::{domain::resource, test_utils::utils::moving_train};
 
     // Synthetic claims isolate each guard; real moving trains claim both resources.
     fn candidate() -> DepartureCandidate {
@@ -60,10 +63,11 @@ mod tests {
         let candidate = candidate();
         let reservation = moving_train(StationId(2), candidate.to, candidate.direction);
         let resources = ResourceView::derive([(1, &reservation)]);
+        let restrictions = RestrictionView::default();
 
         assert!(resources.track_available(candidate.from, candidate.to));
         assert!(!resources.station_slot_available(candidate.to, candidate.direction));
-        assert!(!can_admit_departure(&candidate, &resources));
+        assert!(!can_admit_departure(&candidate, &resources, &restrictions));
     }
 
     #[test]
@@ -72,9 +76,10 @@ mod tests {
         let track_occupant =
             moving_train(candidate.from, candidate.to, candidate.direction.reverse());
         let resources = ResourceView::derive([(1, &track_occupant)]);
+        let restrictions = RestrictionView::default();
 
         assert!(!resources.track_available(candidate.from, candidate.to));
         assert!(resources.station_slot_available(candidate.to, candidate.direction));
-        assert!(!can_admit_departure(&candidate, &resources));
+        assert!(!can_admit_departure(&candidate, &resources, &restrictions));
     }
 }

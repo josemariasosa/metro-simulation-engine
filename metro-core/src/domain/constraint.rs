@@ -9,10 +9,20 @@ pub enum OperationalConstraint {
     StationUnavailable { station: StationId },
 }
 
-struct RestrictionView {
+pub(crate) struct RestrictionView {
     unavailable_tracks: HashSet<(StationId, StationId)>,
     blocked_departure_stations: HashSet<StationId>,
     unavailable_stations: HashSet<StationId>,
+}
+
+impl Default for RestrictionView {
+    fn default() -> Self {
+        Self {
+            unavailable_tracks: HashSet::new(),
+            blocked_departure_stations: HashSet::new(),
+            unavailable_stations: HashSet::new(),
+        }
+    }
 }
 
 impl RestrictionView {
@@ -52,6 +62,13 @@ impl RestrictionView {
 
     fn station_unavailable(&self, station: StationId) -> bool {
         self.unavailable_stations.contains(&station)
+    }
+
+    pub(crate) fn permits_departure(&self, from: StationId, to: StationId) -> bool {
+        !self.track_unavailable(from, to)
+            && !self.station_departures_blocked(from)
+            && !self.station_unavailable(from)
+            && !self.station_unavailable(to)
     }
 }
 
