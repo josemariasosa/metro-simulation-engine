@@ -2,9 +2,9 @@
 
 ## 1. Status and purpose
 
-**Draft for review — specification only; implementation is not authorized.**
+**Revised proposal — ready for checkpoint implementation review; specification only.**
 
-Inspected on 2026-10-05 at commit `9738b62`, following the domain/application
+Inspected on 2026-10-05 at commit `5381e1a`, following the domain/application
 boundary cleanup. MUST and MUST NOT express requirements; SHOULD expresses a
 recommendation. This document selects an MVP and future implementation checkpoints.
 It does not introduce production code, placeholder APIs, or new tests.
@@ -17,8 +17,8 @@ its own concepts into these restrictions and retains its own cause metadata.
 ```text
 external system: incident / policy / scenario
         ↓ consumer-owned translation
-core boundary: add or remove an operational constraint
-        ↓ Simulation-owned active constraint records
+core boundary: schedule or remove an operational constraint
+        ↓ Simulation-owned scheduled/active constraint records
 World N: physical ResourceView + immutable operational restriction view
         ↓ shared domain departure admission
 automatic arbitration / synchronous manual command
@@ -83,8 +83,9 @@ The relevant regression evidence includes [automatic_blocking.rs](../../metro-co
 These prove frozen conga ownership, numeric-ID terminal contention under reversed
 storage order, no reverse fallback on blocking, independent lanes, exclusive
 reservations through arrival, serial manual ordering and observation independence.
-Inspection baseline: `cargo test -p metro-core --offline` passes 114 tests
-(74 unit and 40 integration tests). The existing unused station-field warning remains.
+The prior inspection reported 114 passing core tests (74 unit and 40 integration
+tests). This revision inspects source; that count is historical evidence, not a
+new test run or a fixed acceptance-test count.
 
 ## 3. Event versus persistent constraint
 
@@ -94,7 +95,8 @@ There is no public `ExternalEvent` envelope, event bus, narrative payload, callb
 or event-sourced world in this slice.
 
 Adding/removing a constraint is a synchronous boundary operation, analogous to a
-command. The operation is momentary; its accepted record persists until explicitly
+command. Registration schedules future permission changes; it never closes a resource in
+the already-committed present. Its accepted record persists until explicitly
 removed or expired. Core does not infer repair, incident resolution, or a duration
 from a cause. The consumer translates causes into constraints and retains the
 returned IDs to manage their lifecycle.
@@ -178,107 +180,209 @@ of `ResourceView::track_available`.
 
 ## 6. Public lifecycle contract
 
-Use a separate boundary from train commands. Proposed signatures are:
+One operational model has two scheduling entry points on `Simulation`:
 
 ```rust
-// Proposed APIs on Simulation; no implementation in this draft.
-fn add_constraint(
+// Proposed contract only, not existing implementation. All times are u64 seconds.
+fn create_constraint_at(
     &mut self,
     constraint: OperationalConstraint,
-    expires_at: Option<u64>,
+    start_at: u64,
+    end_at: Option<u64>,
+    origin: ConstraintOrigin,
 ) -> Result<ConstraintId, ConstraintError>;
 
-fn remove_constraint(&mut self, id: ConstraintId)
-    -> Result<(), ConstraintError>;
+fn create_constraint_in(
+    &mut self,
+    constraint: OperationalConstraint,
+    starts_in: u64,
+    duration: Option<u64>,
+    origin: ConstraintOrigin,
+) -> Result<ConstraintId, ConstraintError>;
+
+fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), ConstraintError>;
+
+pub enum ConstraintOrigin { Planned, Injected }
 ```
 
-`ConstraintId(pub u64)` is an opaque simulation-local handle with equality/hashing,
-Copy/Clone/Debug, not an incident ID. Simulation allocates monotonically from zero
-and MUST NOT reuse IDs after removal or expiry. Like train IDs, handles are scoped
-to a simulation; cross-simulation use is unsupported and is not detectable merely
-from the numeric value. Identity allocation and record storage belong to application
-orchestration. `OperationalConstraint` belongs to domain; exported handles/errors
-and the application record belong to the public constraint boundary module.
+`ConstraintId(pub u64)` is an opaque simulation-local handle supporting
+Copy/Clone/Debug/equality/hashing. Allocate monotonically from zero, never reuse
+after removal or expiry. Cross-simulation handles are unsupported; equal numbers
+cannot establish provenance. Use a checked next-counter increment, matching the
+train allocator convention: counter exhaustion fails before allocation or mutation.
 
-An active record stores its ID, operational constraint, `activated_at` simulation
-second, and optional absolute `expires_at`. `Simulation::new` starts with no records
-and retains its current signature. Callers can add initial constraints before
-the first step. There is no mutable registry accessor or replace/update API.
-Changing a restriction means removing a handle and adding another in caller order.
-There is no atomic multi-record transaction in the MVP.
+The private canonical application record contains exactly `id`, `constraint`,
+`start_at`, `end_at`, and `origin`. There are no `PlannedConstraint` or
+`InjectedConstraint` domain types. Do not store `activated_at`: activation is
+completely determined by `start_at` and the current World time. A registration
+timestamp, mutable active flag, activation callback, or activation queue is not
+needed. `Simulation::new` retains its signature and starts with an empty registry.
+There is no mutable registry accessor, update API, or bulk transaction.
 
-Validation MUST complete before changing state or consuming an ID:
+### Canonical interval and conversion
 
-1. Check station references; an ID is valid when its index is below station count.
-2. For a track constraint, require the exact directed `Network::track(from,to)`.
-3. Require `expires_at > elapsed_seconds` when an expiry is supplied.
-4. Check identity-counter capacity before allocating.
+Absolute registration supplies `[start_at, end_at)` directly; `None` means
+`[start_at, infinity)`. Require **`start_at > elapsed_seconds` always**, including
+scenario setup. A finite end MUST satisfy `end_at > start_at`.
 
-Proposed errors: `UnknownStation`, `UnknownTrack`, `InvalidExpiry`,
-`IdExhausted`, and `UnknownConstraint`. Unknown/removed/expired handles return
-`UnknownConstraint` on removal, without mutation. Repeated additions of an equal
-constraint MUST create independent records with distinct IDs. Retried addition is
-therefore not idempotent; reliable input deduplication belongs to the consumer.
-Errors MUST preserve records, allocator, trains, resources and time exactly.
+Relative registration reads the current simulation clock T once during its serial
+call. Require `starts_in > 0` and, when supplied, `duration > 0`. Compute with
+checked arithmetic:
 
-Successful lifecycle operations do not advance time, change any train, retry a
-departure, or revoke a physical claim. Successful removal affects subsequent
-admission; it does not start a train. There is deliberately no global `unblock`
-operation: removing one cause cannot clear another cause's restriction.
+```text
+start_at = T + starts_in
+end_at   = Some(start_at + duration), or None
+```
 
-## 7. Time, expiry and ordering
+Duration runs from activation, not registration. Overflow is an explicit error;
+never wrap, saturate, round, clamp, or translate zero into one second. Immediately
+pass converted values to the same canonical validation/allocation/storage routine
+used by absolute registration. There is one registry and one lifecycle.
+For example, at T=10, `_at(c, 11, Some(15), o)` and
+`_in(c, 1, Some(4), o)` produce the same timing. In equal initial simulations they
+produce equal records and IDs; within one simulation they create independent IDs.
 
-The lifecycle uses integer simulation seconds, never wall time, frame deltas, or
-randomness. `None` means indefinite until removal. A record added at T with expiry E
-is effective over `[T,E)`. Setting E=T or a past expiry is rejected. Future scheduled
-activation is deferred; additions activate immediately between completed steps.
+At initial time 0, the earliest permitted start is 1. There is deliberately no
+setup exception for time 0 and no immediate-activation API. A planned closure
+cannot affect automatic decisions in the step 0→1 or manual admission at 0.
+Scenario authors must schedule their operational horizon accordingly; core MUST
+NOT silently shift a requested interval or suppress those initial admissions.
 
-At entry to a step at T, all records effective at T participate in one immutable
-restriction view. After resolving departures and updating trains, advance to T+1
-and remove records with expiry at or before T+1 before returning. Thus a record
-expiring at 3 blocks admission during the step from 2 to 3, is absent in the
-committed snapshot at 3, and permits a manual command at 3 or an automatic proposal
-in the next step from 3 to 4. The automatic train does not depart retroactively
-in the expiring step. Expiry does not restart dwell or enqueue work.
+### Origin is explicit metadata
 
-This end-of-step cleanup ensures snapshots and commands see only active records
-without making observation mutate state. No expiry processing occurs inside
-snapshot generation. Pausing steps does not age a constraint. Time remains within
-the repository's existing representable-counter assumptions; arbitrary writes to
-the legacy public clock or topology are unsupported runtime behavior.
+Retain `ConstraintOrigin` in the MVP for observation. The caller explicitly labels
+`Planned` when the record belongs to its prearranged scenario plan, and `Injected`
+when it is an intervention introduced during execution. These are caller assertions,
+not phases inferred or enforced by core. Either API accepts either origin: absolute
+runtime injection and relative scenario setup are both valid. Core does not infer
+origin from the clock, API choice, first step, or train activity.
 
-Calls are serial transactions: add-before-Accelerate can reject that command;
-Accelerate-before-add commits a traversal that the later addition cannot revoke.
-Remove-before-step affects that step; remove-after-step affects subsequent calls.
-Equal timestamps are insufficient to reconstruct ordering. Deterministic replay
-requires the same initial setup and ordered sequence of steps, train commands and
-constraint operations. No replay storage or persistence format is introduced.
+Origin MUST NOT affect admission, priority, scheduling validation, expiry,
+arbitration, or lifecycle paths. It is not source identity or narrative causation.
+Replaying identical records with only origin changed preserves operational results
+while intentionally changing observed metadata.
+
+### Validation and errors
+
+Use a separate `ConstraintError`, not `CommandError`. Define explicit variants:
+
+| Error | Meaning |
+| --- | --- |
+| `InvalidStart` | Absolute start is at or before T, or relative delay is zero. |
+| `InvalidEnd` | Finite absolute end is at or before start, or duration is zero. |
+| `TimeOverflow` | A relative start or end cannot be represented as u64. |
+| `UnknownStation` | A referenced station index is outside the network. |
+| `UnknownTrack` | Both endpoints exist but the exact directed edge does not. |
+| `IdExhausted` | The checked identity counter cannot advance. |
+| `UnknownConstraint` | Removal names an unknown, removed, or expired handle. |
+
+For deterministic error precedence, relative normalization checks zero delay,
+zero duration, start overflow, then end overflow; absolute calls need no
+normalization. The common path checks start, finite end, station references
+(source before destination for tracks), exact directed track, then ID capacity.
+Only after all checks succeed may it allocate and insert. With otherwise valid
+inputs, both APIs produce identical canonical validation results.
+
+Every failure registers nothing and consumes no ID. Trains, physical claims,
+records, time, allocator state and resulting snapshots MUST remain exactly equal
+to their pre-call values. Do not perform opportunistic cleanup on failed calls.
+Validate private allocator state as well as visible snapshots in tests.
+
+Equal constraints create distinct records and independent lifecycles. They are
+not deduplicated; consumer retry deduplication remains outside core. Removing a
+scheduled record cancels it; removing an active record lifts that cause for later
+serial admissions. Removing one cause never clears another. Removal is immediate,
+including at the same timestamp, but never revisits committed decisions. The
+strict future-only rule governs registration, not explicit cancellation/removal.
+This preserves the existing synchronous command boundary, without adding a second
+scheduled-removal API. Changing a record requires removal and new future registration.
+
+Successful registration/removal does not advance time, mutate a train or physical
+claim, retry a departure, or start a train. Registration changes observable future
+records immediately, but leaves current operational permission unchanged.
+
+## 7. Time, activation, expiry and ordering
+
+Lifecycle uses integer simulation seconds, never wall time or frame deltas:
+
+```text
+t < start_at                             scheduled, inactive
+start_at <= t && (end_at is None || t < end_at)   active
+end_at is Some(E) && t >= E               expired
+```
+
+Derive activity from the World timestamp; do not persist a second lifecycle state.
+At the end of each one-second step, after fixed decisions and movement/dwell
+updates, advance time to T+1 and remove records whose finite end is at or before
+T+1 before returning World N+1. Scheduled records remain stored. Activation needs
+no mutation: records whose start equals T+1 participate in the next view, never
+in the step just completed. No cleanup or activation occurs inside observation.
+Pausing steps does not age restrictions.
+
+For a record registered at current_time=10 with start_at=11 and end_at=15:
+
+| Admission point | Effect of this record |
+| --- | --- |
+| Manual at 10; automatic step 10→11 | None; record is scheduled. Any accepted traversal remains valid. |
+| Snapshot at 11 | Record is active, even though decisions producing 11 used time 10. |
+| Manual at 11, 12, 13, 14 | Blocks matching new admission. |
+| Automatic steps 11→12, 12→13, 13→14, 14→15 | Blocks matching proposals against each starting World. |
+| Snapshot at 15 | Record has expired and is absent. A train blocked during 14→15 remains stopped. |
+| Manual at 15; automatic step 15→16 | This record no longer blocks; physical claims and other restrictions still apply. |
+
+Thus an otherwise free automatic Ready train first departs in the reopening step
+15→16, observed Moving with traversal elapsed zero at 16. Manual admission can
+succeed at 15 with a fresh command. For `[11,12)`, exactly step 11→12 is restricted.
+`None` has the same start semantics and no automatic expiry.
+
+Calls are serial transactions between complete steps; no operation interleaves
+with resolution/commit. Registering a future constraint before versus after an
+Accelerate at the same T does not change current permission. By contrast,
+remove-active-before-Accelerate can permit it, while Accelerate-before-remove
+returns Blocked. A registration made before a step resolves relative time from
+that starting timestamp; the same call after the step resolves from the new time.
+Replay requires the same initial state and ordered sequence of registrations
+(including arguments/origin), removals, commands and steps, not just timestamps.
+No replay storage or event-sourcing framework is introduced.
+
+Time remains within the existing representable step-counter assumptions; this
+milestone does not redesign `step()` overflow behavior. Scheduling arithmetic is
+nevertheless checked, including near u64::MAX. Arbitrary writes to the legacy
+public clock or topology are unsupported runtime behavior, not scheduling APIs.
 
 ## 8. Integration with the existing simulation pipeline
 
-The automatic pipeline MUST remain:
+For World N committed at timestamp T, the automatic pipeline MUST remain:
 
-1. Derive physical starting resources and operational restrictions from committed
-   World N. Collect eligible candidates with the existing domain selector.
-2. Resolve proposals by numeric train ID using the shared admission helper and
-   the existing application-owned accepted-claim sets. Both views remain frozen.
-3. Commit fixed decisions and advance other trains with existing narrow transitions.
-4. Advance one simulation second and expire constraint records at that boundary.
+1. Derive physical `ResourceView` from World N and one immutable `RestrictionView`
+   from records active at T. Collect eligible candidates with the existing selector.
+2. Resolve every proposal in ascending numeric train ID against those frozen views
+   and the application-owned accepted-track/destination-slot sets.
+3. Commit fixed decisions; advance other moving/dwelling trains with existing
+   narrow transitions. Do not reevaluate admission during commit.
+4. Advance time to T+1 and prune expired records. Return committed World N+1;
+   activity at its timestamp governs subsequent calls and the next step.
 
-Do not migrate proposal identity, ordering, clocks, or record lifecycles into domain
-primitives. Only departure admission gains operational input. Existing movement,
-dwell and topology semantics remain authoritative.
+No mid-step activation or expiration can revise a resolved or committed decision.
+Reopening cannot enable same-step cascading resource reuse: a source slot occupied
+in the starting World stays unavailable to other proposals throughout that step,
+including when its train departs. Accepted claims still prevent batch contention.
+
+Only departure admission gains operational input. Identity, eligibility, proposal
+ordering, clocks, record lifecycle and orchestration remain in application.
+`RestrictionView` receives active operational values, never application records.
 
 Manual validation order remains unknown train → control mode → moving no-op →
-candidate selection → combined admission → commit. A rejected operational admission
-returns existing `CommandError::Blocked`. It preserves the entire pre-command
-world, including constraints. No new train blocked state or reason taxonomy is
-required. Already-moving manual Accelerate returns `Ok(())` even after closure.
+candidate selection → combined admission → commit. For each command, derive views
+from the latest committed serial state at T using the same activity predicate and
+shared domain admission helper. Operational rejection returns existing
+`CommandError::Blocked`, preserving the entire pre-command world. Moving manual
+Accelerate remains `Ok(())` without mutation, even under active closure.
 
-An automatic train denied by a constraint completes dwell into Ready, stays in
-its committed directional source slot at velocity zero, and retries once on each
-later step. A manual train requires a fresh command after removal/expiry. Early
-manual departure is still permitted when combined admission succeeds.
+Blocked automatic trains complete dwell into Ready, remain in their committed
+source slot at velocity zero, and retry each later step. Manual trains require a
+fresh command after blocking clears; no intent is buffered. Early manual departure
+remains permitted when combined admission succeeds. There is no new blocked state.
 
 ## 9. Constraints imposed on occupied resources
 
@@ -298,6 +402,14 @@ or evacuated. A departure-only restriction allows new arrivals, which may then
 wait indefinitely. Station closure or physical congestion may prevent all progress;
 safety, rather than guaranteed liveness, is the MVP contract.
 
+**Blocked means blocked.** Planned and injected closures may produce queues that
+remain indefinitely. No alternate path search, rerouting, skip-station behavior,
+bypassing a closed station, automatic service-plan modification, fairness/deadlock
+resolution, or dynamic topology mutation belongs to this milestone. Passing through
+a station while forbidding passenger boarding/alighting is a distinct future
+service-policy concept; it MUST NOT be represented by reinterpreting
+`StationUnavailable`.
+
 Consumers MUST translate only effects compatible with these semantics. A real-world
 or narrative assertion that an occupied tunnel is physically destroyed requires
 an emergency movement model beyond SPEC-005; this vocabulary represents the resulting
@@ -312,112 +424,249 @@ Extend `SimulationSnapshot` with `constraints: Vec<ConstraintSnapshot>`:
 pub struct ConstraintSnapshot {
     pub id: ConstraintId,
     pub constraint: OperationalConstraint,
-    pub activated_at: u64,
-    pub expires_at: Option<u64>,
+    pub start_at: u64,
+    pub end_at: Option<u64>,
+    pub origin: ConstraintOrigin,
 }
 ```
 
 These values and the operational enum MUST be owned, cloneable and comparable.
-Snapshots list active records in ascending numeric constraint-ID order, regardless
-of internal registry iteration. Duplicate effects appear as distinct records so
-consumers can observe independent lifecycles. Empty simulations report an empty
-constraint vector. No cause strings, mutable registry, synthetic claims, event
+Snapshots list **all registered, unexpired records, both scheduled and active**,
+in ascending numeric constraint-ID order, regardless of internal registry iteration.
+Consumers derive Scheduled versus Active from the snapshot's `elapsed_seconds` and
+the interval using section 7; no duplicate status field is necessary. Expired and
+explicitly removed records are absent. This exposes future maintenance plans and
+queued interventions deterministically without requiring polling to trigger lifecycle
+changes. It is a current registry view, not a history: consumers retaining a prior
+record can infer expiry eligibility and detect disappearance before its end, but
+cannot reconstruct unobserved removals; a single snapshot does not explain every
+absent handle. Duplicate effects appear as distinct records so
+consumers can observe independent lifecycles. Simulations with no registered constraints report an empty
+constraint vector; a simulation without trains may still contain constraints. No cause strings, mutable registry, synthetic claims, event
 history, or predicted departure time are exposed.
 
 Train snapshot fields and train vector ordering remain unchanged. Ready continues
 to mean completed dwell, not a unique explanation of why a train waits. Observed
-constraints show restrictions in force, not a definitive per-train denial reason.
+constraints show planned intervals and current restrictions, not a definitive
+per-train denial reason.
 Repeated/omitted snapshots cannot affect expiry, IDs, admissions or arbitration.
 Retained snapshots survive lifecycle changes at the same elapsed timestamp.
 
 Adding a public snapshot field requires updating struct literals in core tests and
 any workspace consumers. This is an explicit source compatibility change in the
 current 0.1 crate. Existing snapshot methods and train command signatures stay
-unchanged. Export operational values, IDs and errors through a public `constraint`
+unchanged. Export operational values, IDs, origin and errors through a public `constraint`
 module; the private domain model remains private. No serialization dependency is
 needed. Bevy continues to display train snapshots and publish after mutations;
 constraint rendering, incident UI and a new `metro-game` crate are deferred.
 
 ## 11. Acceptance and verification
 
-All scenarios MUST assert physical invariants at committed boundaries and use
-ID-keyed train comparisons where storage order differs. Unless specified, use
-adjacent bidirectional two-second tracks and three-second initial dwell.
+All traces MUST preserve SPEC-003 physical invariants at every committed boundary:
+capacity one per directed track and directional station slot, no occupied/reserved
+slot overlap, exclusive destination reservation through arrival, opposite lanes
+independent, atomic departure and committed direction, no claim theft, no same-step
+reuse of released starting claims, and admitted traversal completion followed by
+fresh dwell. Use ID-keyed comparisons where storage order differs. Unless stated,
+use adjacent bidirectional two-second tracks and three-second initial dwell.
 
 | Scenario | Required result |
 | --- | --- |
-| Empty restrictions | Existing 114 core tests preserve railway behavior; snapshot literal changes only add empty records. |
-| Directed closure | A→B closure blocks automatic and early manual A→B admission; B→A remains admissible when physically free. |
-| Departure-only station restriction | A→B remains admissible with departures blocked at B; B→C and terminal reverse departures from B are blocked. |
-| Station unavailable | New inbound and outbound departures in either direction are blocked; unrelated stations/tracks remain admissible. |
-| Existing-track selection | Blocked current-direction edge does not select a free reverse edge; blocked terminal reversal preserves original direction and slot. |
-| Manual exact rejection | `Blocked` preserves all trains, timings, directions, velocities, records and derived physical claims; unknown/nonmanual/moving validation precedence is unchanged. |
-| Automatic dwell and retry | Block at A before dwell completes: t=3 is Ready A, stopped. Remove at t=3: no immediate departure; next step commits movement at t=4, traversal elapsed zero. |
-| Manual no buffering | Reject, remove closure, then step: train remains stopped; fresh Accelerate can depart without advancing time. |
-| Independent causes | Two equal records block one target. Removing or expiring one leaves the other effective; removing the last exposes normal physical admission. |
-| Restriction composition | Track closure, source block and destination closure compose without override; clearing a restriction never clears an unrelated one. |
-| Occupied resources | Add closures after departure and over occupied stations successfully; exact physical owners/reservations remain unchanged. Moving train completes at the original time with fresh dwell. |
-| Moving no-op | Accelerate on a moving manual train succeeds without progress/reset even under track and destination closure. |
-| Physical ownership after removal | With closures cleared, existing occupants/reservations still block; lower-ID proposals cannot displace them. |
-| Expiry boundary | Add at t=0, E=3: effective at t=0/1/2, automatic t=3 remains Ready, snapshot at 3 omits record, manual admission at 3 can succeed, automatic retry departs at 4. |
-| Indefinite duration | Many steps and arbitrary snapshots do not remove a `None` record; only explicit removal does. |
-| Validation atomicity | Invalid source/destination/station/edge, expiry at or before now, exhausted allocator and unknown removal leave full world and allocator unchanged. Include reverse-edge absence and expired handle removal. |
-| Identity lifecycle | Equal additions get unique IDs; IDs are not reused after removal or expiry; failed additions consume no ID. |
-| Frozen conga | A/B/C Forward trains, D empty, closure C→D: t=3 all Ready. Remove at 3: t=4 only C→D departs; t=5 B→C departs; t=6 A→B departs. No same-step cascading release. |
-| Deterministic contention | Hold both terminal competitors with a closure, then remove it. Existing lowest-ID winner is unchanged under reversed train storage order; manual competitors still resolve by call order. |
-| Ordered calls at equal time | Add then Accelerate rejects; Accelerate then add retains moving train. Replay identical operation order produces equal worlds and result sequences. |
-| Snapshot ownership/order | Repeated reads equal; editing retained DTOs changes no simulation; record order numeric by ID; retained snapshots preserve removed/expired records and old train state. |
-| Observation independence | Frequent versus sparse snapshots through add/remove/expiry, conga and contention produce identical outcomes and ID allocation. |
+| Empty restrictions | All existing core regressions retain behavior; snapshot literals gain empty constraint vectors only. |
+| Absolute scheduling | At T=0 register `[1,5)`; canonical interval is exact, inactive at 0, active at 1–4, absent at 5. No train changes during registration. |
+| Relative scheduling | At T=10 register delay 1, duration 4; canonical interval is `[11,15)`. `None` remains indefinite from the computed start. |
+| API equivalence | Equal simulations, origin and ordered calls using absolute versus equivalent relative inputs yield identical canonical records, IDs, snapshots and operational traces. |
+| Strict future validation | Separately reject start equal to T, start less than T (T>0 fixture), and zero delay with `InvalidStart`; include scenario setup at T=0. No implicit adjustment. |
+| End validation | Reject end equal to or before start and zero duration with `InvalidEnd`; accept duration 1 and indefinite end. |
+| Arithmetic limits | Checked relative start and end overflow each return `TimeOverflow`; no wrap/saturation. Test normalization/error precedence and canonical validation precedence. |
+| Validation atomicity | Every temporal error preserves full state, snapshots and private next-ID counter; the next valid call gets the ID it would have received without failure. Repeat for invalid targets, ID exhaustion and unknown removal. |
+| Target validation | Invalid source/destination/station and absent exact directed edge reject; existence of the reverse edge alone is insufficient. |
+| Exact World boundaries | Assert every row of the T=10, `[11,15)` table, including scheduled observation at 10 and active observation at 11; no retroactive rejection of admission in 10→11. Include `[11,12)`. |
+| Planned queue | Before stepping, schedule C→D `[1,5)` with Forward trains at A/B/C and D empty. At 3 all are Ready; at 4 and 5 all remain stopped. Congestion is permitted, not repaired. |
+| Injected equivalent queue | Step the same initial state to 1, inject delay 1/duration 3 (`[2,5)`). No affected proposal occurs before 2 under default dwell, so train/claim traces equal the planned fixture through reopening. Metadata/timing observations intentionally differ. Also compare identical intervals with only origin changed. |
+| Origin independence | Exercise both APIs with both origins. Equal intervals/physical state produce equal admission, contention, expiry and train traces, irrespective of origin. |
+| Directed closure | While active, A→B blocks automatic and early manual admission; physically free B→A is unaffected. |
+| Departure-only station | Blocking departures at B permits new A→B admission but blocks B→C and terminal reverse departures from B. |
+| Station unavailable | New inbound/outbound admission in both directions is blocked; unrelated routes remain usable. No bypass or passenger-only reinterpretation. |
+| Existing-track selection | Blocking a current-direction edge does not select a free reverse edge or return `NoOutgoingTrack`; blocked terminal reversal preserves original direction and slot. |
+| Manual exact rejection | `Blocked` preserves trains, timings, directions, velocity, records, time and claims. Unknown/nonmanual/moving validation precedence remains unchanged. |
+| Automatic retry | Closure `[1,3)` blocks the dwell-completion proposal in 2→3. At 3 the train is Ready and record absent; 3→4 retries and commits Moving at elapsed zero if physically free. No departure during expiry cleanup. |
+| Manual no buffering | Command while closure is active rejects. After expiry or explicit removal, steps do not retry it; fresh Accelerate can depart at the same timestamp without advancing time. |
+| Independent causes | Equal records have distinct IDs; removing one or expiring it leaves the other's restriction effective. Cover overlapping unequal intervals, scheduled cancellation, and one scheduled record becoming active as another expires. |
+| Composition | Track, source and destination restrictions combine by OR for denial; removal never overrides other restrictions or physical claims. |
+| Occupied resources/admitted movement | After a supported departure, register a future closure over its occupied track and reserved destination. Registration succeeds without claim changes. Activation during traversal does not stop, redirect, revoke or reject arrival; traversal finishes on its original schedule with fresh dwell. |
+| Occupied station | Register/activate over an occupied station; train remains, dwell progresses, later departures are blocked. |
+| Moving no-op | Manual Accelerate while Moving is an exact successful no-op before and after activation. |
+| Physical safety on reopening | Existing occupants and reservations still block when the last restriction clears; a lower-ID proposal cannot displace them. |
+| Indefinite interval | Inactive before start, active thereafter across many steps and snapshots until explicit removal. |
+| Identity lifecycle | Distinct successful registrations get monotonically increasing IDs; cancellation/removal/expiry never permit reuse. Unknown, removed and expired handles return `UnknownConstraint` without mutation. |
+| Frozen conga | Planned queue above: `[1,5)` expires at 5, no retroactive departure in 4→5; at 6 only C→D departs, at 7 B→C, at 8 A→B. Repeat reopening by removal. No same-step cascading release. |
+| Deterministic contention | Hold terminal competitors with scheduled closure, then expire/remove it. Lowest numeric train ID wins automatic contention under reversed storage order; manual competitors resolve by serial call order. |
+| Equal-time ordering | Future registration never blocks a current command. Removing an active cause before versus after a command affects that command only. Moving a relative call across a step shifts its interval by one second. |
+| Snapshot lifecycle/order | Immediately expose scheduled records; derive active status at start; omit at end or cancellation. Numeric ID order survives registry reordering. Duplicate records remain distinct. |
+| Snapshot ownership | Repeated reads equal; editing retained DTOs cannot mutate simulation; old snapshots retain scheduled/active records and train state after later activation/removal/expiry, even for mutations at equal timestamps. |
+| Observation independence | Frequent versus sparse/no intermediate reads across registration, activation, cancellation, expiry, conga and contention produce equal results and subsequent IDs. |
+| Replay equivalence | Same initial state and ordered constraint operations, commands and steps produce equal result sequences, IDs, committed snapshots and train/claim traces; observation frequency is irrelevant. |
 
-Domain unit tests isolate each restriction predicate with physically available
-resources and prove physical guards still reject when the restriction view is
-empty. Application unit tests may inspect private allocator state or reverse
-storage order using established test hooks. Public integration traces MUST use
-supported constructors, lifecycle operations, steps, train commands and snapshots.
-Avoid exposing internal resource views or mutable records for testing convenience.
+Domain unit tests isolate predicates with physically available resources and prove
+physical guards still reject with empty restrictions. Application unit tests may
+inspect private records/allocator or reverse storage using established hooks.
+Public integration traces use supported constructors, scheduling/removal APIs,
+steps, commands and snapshots; do not expose mutable internals for tests.
 
-Future implementation verification: `cargo test -p metro-core`, relevant workspace
-consumer tests, and a workspace build/check to catch snapshot/API migration.
-No graphical run is required for a core-only milestone with no presentation change.
+Future implementation gates: `cargo test -p metro-core`, relevant consumer tests,
+`cargo test --workspace`, and `cargo check --workspace` after public API/snapshot
+migration. No graphical run is required. This specification-only revision does
+not introduce tests or claim a fresh implementation verification run.
 
-## 12. Future implementation checkpoints
+## 12. Implementation checkpoints
 
-Each checkpoint is tests-first, compiles independently, and ends in review.
-Specification approval alone does not authorize beginning implementation.
+Each checkpoint is tests-first, independently compiling, separately reviewable and
+committable. Tests introduced at that checkpoint pass before proceeding, alongside
+existing core regressions. These are implementation instructions for subsequent
+authorized work; this revision implements none of them.
 
-1. **Domain vocabulary and admission.** Add operational values, a private restriction
-   view and isolated combined-admission tests. Wire both departure paths to an
-   initially empty restriction view without changing behavior. Review dependency
-   direction and existing regression results.
-2. **Application lifecycle and observation.** Introduce private simulation records,
-   IDs, validation, add/remove operations, snapshot records and literal migrations.
-   Wire active records into both paths in the same checkpoint so no accepted
-   restriction is observable yet operationally ignored. Verify independent causes,
-   occupied-resource coexistence, serial ordering and owned snapshots.
-3. **Expiry and complete traces.** Add end-of-step expiry, boundary tests, automatic
-   retry/manual no-buffering traces, conga and contention under restrictions, and
-   frequent/sparse observation replays. Complete workspace compatibility checks.
+To avoid publicly accepting restrictions that are operationally ignored, keep the
+application scheduling methods crate-private during checkpoints 3–4. Checkpoint 5
+publishes both APIs when behavior is wired. Do not ship intermediate checkpoints
+as the completed feature. Snapshot visibility follows in checkpoint 6; this staged
+construction is deliberate, not an alternative final observation contract.
 
-Do not use these checkpoints to move orchestration back into domain, introduce a
-new generic simulation engine, or implement consumer game concepts.
+### 1. Operational domain vocabulary and RestrictionView
 
-## 13. Definition of done and deferred work
+- **Scope:** Three `OperationalConstraint` variants and private concrete membership
+  view in domain. No application IDs or time.
+- **Tests first:** Each directed-track/source-station/station-endpoint predicate;
+  reverse-edge independence; overlapping values compose by OR; empty view permits.
+- **Implementation:** Add owned comparable values and view construction/queries from
+  operational values only; expose only the intended value type through the boundary.
+- **Non-goals:** Admission signature changes, registry, scheduling, snapshots.
+- **Review gate:** Domain has no Simulation/application imports; ResourceView remains
+  untouched and physical; existing railway tests pass.
 
-Implementation is complete when all selected constraint kinds have the defined
-independent lifecycle, optional simulation-time expiry and owned observation;
-manual and automatic admission share the same restriction rules; existing physical
-claims and traversal completion remain correct; deterministic acceptance traces
-pass; and workspace consumers compile after the snapshot addition.
+### 2. Shared combined departure admission with empty integration views
 
-Deferred: scheduled activation, event journals/replay storage, persistence/serde,
-atomic bulk changes, external source identity/deduplication, permission systems,
-blocking-reason DTOs, emergency stopping, dynamic topology/destruction, rerouting,
-configurable station capacities, directional station closures, speed/dwell effects,
-fairness/deadlock handling, presentation and game integrations.
+- **Scope:** Extend the existing domain admission helper to combine both views;
+  supply empty restrictions from both current call sites.
+- **Tests first:** Each operational rejection with physically free resources,
+  occupied/reserved rejection with empty restrictions, combined guards and terminal
+  candidate behavior; run existing manual/automatic regression tests.
+- **Implementation:** Change helper signature and manual/automatic plumbing only.
+  Selection, accepted-claim sets and commit ordering remain as they are.
+- **Non-goals:** Live restrictions, identity/storage, scheduling APIs, snapshots.
+- **Review gate:** Empty restrictions preserve existing behavior; both flows call
+  the same helper; frozen physical views and numeric-ID arbitration remain intact.
 
-The selected decisions for review are persistent constraints rather than a core
-event framework; separate restriction and ownership views; three generic closure
-types; independent handle-based records; immediate serial lifecycle operations;
-optional half-open simulation-time expiry; completion of already-admitted movement;
-and an explicit additive snapshot field. No architectural decision is left to an
-implementation accident, and this draft does not authorize production changes.
+### 3. Application records and absolute scheduling lifecycle
+
+- **Scope:** Private canonical registry, ConstraintId/origin/errors, crate-private
+  absolute registration/removal, activity selection, and boundary expiry cleanup.
+- **Tests first:** Future/equal/past start, finite end ordering, target validation,
+  allocator exhaustion/atomicity, duplicate IDs/causes, explicit origin preservation,
+  scheduled cancellation, activity at start/end, pruning and expired-handle removal.
+- **Implementation:** One validate-then-allocate path; application-only records and
+  active-value derivation; end-of-step pruning after time advancement. No mutable
+  activation flag. Keep registration unavailable to external callers at this stage.
+- **Non-goals:** Relative conversion, live admission wiring, snapshot migration.
+- **Review gate:** Registry lifecycle works independently; no failed call consumes
+  an ID or changes world state; stepping without records remains identical. Domain
+  receives neither records nor clock. Expiry foundations are complete here, not
+  secretly postponed to checkpoint 7.
+
+### 4. Relative scheduling through canonical conversion
+
+- **Scope:** Crate-private relative entry point as a checked conversion adapter.
+- **Tests first:** Equivalent absolute/relative records, zero delay/duration, both
+  overflow sites, indefinite duration, duration measured from start, origin parity,
+  error precedence and no-ID-consumption across conversion errors.
+- **Implementation:** Capture T once, normalize, delegate to checkpoint 3's common
+  path. No second allocator, registry, validation policy or lifecycle.
+- **Non-goals:** New domain types, admission integration, public release, snapshots.
+- **Review gate:** Equal canonical inputs share validation/storage results; no silent
+  input correction; existing absolute lifecycle tests pass unchanged.
+
+### 5. Active scheduled restrictions in both simulation flows
+
+- **Scope:** Wire active-value views into step and command admission; publish the
+  two scheduling APIs and removal when they enforce their complete behavior.
+- **Tests first:** Activation/expiry admission table, planned/injected queues,
+  origin invariance, manual exact rejection/no buffering, automatic retry, occupied
+  track/station coexistence, admitted arrival, moving no-op and duplicate causes.
+- **Implementation:** One frozen active view per step and latest committed view per
+  serial manual command. Preserve shared domain rules and accepted-claim handling.
+- **Non-goals:** Snapshot DTO changes, blocked-reason APIs, recovery/rerouting, UI.
+- **Review gate:** Public APIs cannot accept an operationally ignored active record;
+  future registration changes no present admission; SPEC-003 safety and frozen
+  World-N ordering hold; cleanup never retries departures.
+
+### 6. Snapshot observation and workspace API migration
+
+- **Scope:** Owned constraint DTOs for all scheduled/active records, ordered by ID;
+  migrate snapshot literals and consumer compilation.
+- **Tests first:** Scheduled observation immediately after creation; start/end and
+  cancellation visibility; retained/modified DTO independence; duplicate ordering;
+  unchanged train order; pure repeated snapshots at equal timestamps.
+- **Implementation:** Map private records to the specified public fields; export
+  intended IDs/errors/origin/value types; update workspace literals and adapters
+  only where required by the added field.
+- **Non-goals:** Rendering constraints, lifecycle changes in observers, serialized
+  history, consumer/game features, new train snapshot fields.
+- **Review gate:** Snapshot reads mutate nothing; no time/status duplication;
+  scheduled and active records are distinguishable by interval and snapshot time;
+  core tests, relevant consumer tests and workspace check pass.
+
+### 7. Full boundary, safety and deterministic trace verification
+
+- **Scope:** Cross-feature integration verification using completed public APIs;
+  close remaining acceptance-matrix gaps, not implement deferred lifecycle basics.
+- **Tests first:** Full reopening conga, reversed-storage contention, duplicate
+  handoff at equal end/start, serial command ordering, replay equality and
+  frequent/sparse observation across every lifecycle boundary. Assert physical
+  invariants throughout, not just final positions.
+- **Implementation:** Add integration traces and only fixes exposed by them; verify
+  every matrix row and complete workspace tests/check. No new feature subsystem.
+- **Non-goals:** Recovery, event journals, optimizers, new timing semantics or
+  consumer integration beyond compatibility.
+- **Review gate:** All matrix cases covered, workspace verification passes, domain
+  dependency direction intact, both flows obey identical operational rules, and
+  origin/observation/storage order cannot change arbitration or safety.
+
+## 13. Definition of done, deferred work and consistency review
+
+Implementation is complete when the three generic constraint kinds have one
+application-owned scheduled lifecycle, checked absolute/relative registration,
+strict future-only starts, optional half-open end, independent IDs and explicit
+metadata-only origin; manual/automatic admission uses frozen applicable views;
+owned snapshots expose scheduled and active records deterministically; admitted
+traversals and physical safety remain intact; and the acceptance matrix and
+workspace compatibility checks pass.
+
+Deferred: event journals/replay storage, persistence/serde, atomic bulk changes,
+external source identity/deduplication, permission systems, blocking-reason DTOs,
+emergency braking, stranded trains/evacuation, destruction/dynamic topology,
+rerouting/alternate paths/skip-station/bypass/service-plan modification,
+pass-through passenger service policies, configurable capacities, directional
+station closures, speed/dwell effects, fairness/deadlock handling, presentation
+and game integrations. Scheduled activation is part of this MVP, not deferred.
+
+Architectural consistency review against commit `5381e1a`:
+
+| Repository boundary | Revised contract |
+| --- | --- |
+| Private domain and pure departure helper | Operational values and predicates only; no Simulation, IDs, origins, clocks or records in RestrictionView. |
+| Generic ResourceView owners | Physical claims only; closures neither occupy nor mutate resources/topology. |
+| Shared manual/automatic admission | Same combined predicate; retain serial manual order versus numeric-ID batch arbitration. |
+| Simulation-owned orchestration | Identity, checked conversion, storage, interval filtering, pruning, proposal ordering and time remain application concerns. |
+| Existing commit-before-clock step | World-N restrictions stay frozen through commit; T+1 activation/expiry affects subsequent decisions only. |
+| Existing admitted movement | Arrival bypasses new admission as before; closures never revoke its reservation. |
+| Pure owned snapshots | Add ordered scheduled/active records without read-triggered cleanup or a second active-state clock. |
+| Existing candidate selection | Closure never removes an edge or triggers fallback, rerouting or station bypass. |
+| Incremental integration | Domain vocabulary and shared admission separate; private lifecycle precedes public behavior, then observation and complete traces. |
+
+No unresolved architectural decision blocks checkpoint implementation. Known limits
+are explicit choices: initial World 0 cannot be restricted by new registration;
+explicit removal affects later serial calls immediately; snapshots are not history;
+legacy direct clock/topology mutation is unsupported; overall step-counter overflow
+is not redesigned. A requirement for initially active closures would require a
+separate future contract discussion, not an exception to this specification's
+strict start rule. Production implementation remains outside this revision.
