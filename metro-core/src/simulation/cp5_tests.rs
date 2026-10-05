@@ -260,6 +260,38 @@ fn future_constraints_over_claimed_resources_preserve_traversal() {
             ..
         }
     ));
+    assert_exact_command(&mut s, Err(CommandError::Blocked));
+    crate::test_utils::utils::assert_physical_invariants(&s);
+}
+
+#[test]
+fn occupied_station_keeps_dwell_and_blocks_new_departure_until_reopening() {
+    let mut s = world(false, 1, Direction::Forward, 3);
+    schedule(&mut s, closure(1), 1, Some(4));
+
+    for expected_time in 1..=4 {
+        s.step();
+        crate::test_utils::utils::assert_physical_invariants(&s);
+        assert_eq!(s.elapsed_seconds, expected_time);
+        assert!(matches!(
+            s.trains[0].train.state(),
+            TrainState::AtStation {
+                station: StationId(1),
+                ..
+            }
+        ));
+    }
+    assert!(s.snapshot().constraints.is_empty());
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert!(matches!(
+        s.trains[0].train.state(),
+        TrainState::Moving {
+            from: StationId(1),
+            to: StationId(2),
+            elapsed_seconds: 0
+        }
+    ));
 }
 
 #[test]
@@ -297,6 +329,142 @@ fn overlapping_causes_block_until_last_cause_clears() {
             command(&mut s).unwrap();
         }
     }
+}
+
+#[test]
+fn equal_time_handoff_keeps_duplicate_causes_continuously_effective() {
+    let mut s = world(true, 0, Direction::Forward, 1);
+    let ending_at_five = s
+        .create_constraint_at(closure(0), 1, Some(5), ConstraintOrigin::Planned)
+        .unwrap();
+    let starting_at_five = s
+        .create_constraint_at(closure(0), 5, Some(8), ConstraintOrigin::Injected)
+        .unwrap();
+    let removed_duplicate = s
+        .create_constraint_at(closure(0), 1, Some(4), ConstraintOrigin::Injected)
+        .unwrap();
+    let expiring_duplicate = s
+        .create_constraint_at(closure(0), 1, Some(6), ConstraintOrigin::Planned)
+        .unwrap();
+
+    for _ in 0..3 {
+        s.step();
+        crate::test_utils::utils::assert_physical_invariants(&s);
+    }
+    assert_eq!(s.elapsed_seconds, 3);
+    assert_eq!(
+        s.snapshot()
+            .constraints
+            .iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![
+            ending_at_five,
+            starting_at_five,
+            removed_duplicate,
+            expiring_duplicate
+        ]
+    );
+
+    s.remove_constraint(removed_duplicate).unwrap();
+    assert_exact_command(&mut s, Err(CommandError::Blocked));
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert_exact_command(&mut s, Err(CommandError::Blocked));
+
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert_eq!(s.elapsed_seconds, 5);
+    assert_eq!(
+        s.snapshot()
+            .constraints
+            .iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![starting_at_five, expiring_duplicate]
+    );
+    assert_exact_command(&mut s, Err(CommandError::Blocked));
+
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert_eq!(s.elapsed_seconds, 6);
+    assert_eq!(s.snapshot().constraints[0].id, starting_at_five);
+    assert_exact_command(&mut s, Err(CommandError::Blocked));
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert_exact_command(&mut s, Err(CommandError::Blocked));
+
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert_eq!(s.elapsed_seconds, 8);
+    assert!(s.snapshot().constraints.is_empty());
+    command(&mut s).unwrap();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+
+    let next = s
+        .create_constraint_at(closure(0), 9, None, ConstraintOrigin::Injected)
+        .unwrap();
+    assert_eq!(next.0, 4);
+}
+
+#[test]
+fn terminal_reversal_retries_after_operational_expiry() {
+    let mut s = world(false, 2, Direction::Forward, 3);
+    schedule(
+        &mut s,
+        OperationalConstraint::TrackUnavailable {
+            from: StationId(2),
+            to: StationId(1),
+        },
+        1,
+        Some(4),
+    );
+
+    for expected_time in 1..=4 {
+        s.step();
+        crate::test_utils::utils::assert_physical_invariants(&s);
+        assert_eq!(s.elapsed_seconds, expected_time);
+        if expected_time < 4 {
+            assert_eq!(s.trains[0].train.direction(), Direction::Forward);
+            assert!(matches!(
+                s.trains[0].train.state(),
+                TrainState::AtStation {
+                    station: StationId(2),
+                    ..
+                }
+            ));
+            if expected_time >= 3 {
+                assert!(matches!(
+                    s.trains[0].train.state(),
+                    TrainState::AtStation {
+                        state: AtStationState::Ready,
+                        ..
+                    }
+                ));
+            }
+        }
+    }
+
+    assert!(s.snapshot().constraints.is_empty());
+    assert_eq!(s.trains[0].train.direction(), Direction::Forward);
+    assert!(matches!(
+        s.trains[0].train.state(),
+        TrainState::AtStation {
+            station: StationId(2),
+            state: AtStationState::Ready
+        }
+    ));
+    s.step();
+    crate::test_utils::utils::assert_physical_invariants(&s);
+    assert_eq!(s.trains[0].train.direction(), Direction::Backward);
+    assert!(matches!(
+        s.trains[0].train.state(),
+        TrainState::Moving {
+            from: StationId(2),
+            to: StationId(1),
+            elapsed_seconds: 0
+        }
+    ));
 }
 
 #[test]
