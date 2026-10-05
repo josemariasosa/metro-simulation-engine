@@ -9,13 +9,13 @@ pub(crate) enum OperationalConstraint {
     StationUnavailable { station: StationId },
 }
 
-pub(crate) struct RestrictionView {
+pub(crate) struct ConstraintView {
     unavailable_tracks: HashSet<(StationId, StationId)>,
     blocked_departure_stations: HashSet<StationId>,
     unavailable_stations: HashSet<StationId>,
 }
 
-impl Default for RestrictionView {
+impl Default for ConstraintView {
     fn default() -> Self {
         Self {
             unavailable_tracks: HashSet::new(),
@@ -25,7 +25,7 @@ impl Default for RestrictionView {
     }
 }
 
-impl RestrictionView {
+impl ConstraintView {
     pub(crate) fn from_constraints(
         constraints: impl IntoIterator<Item = OperationalConstraint>,
     ) -> Self {
@@ -83,7 +83,7 @@ mod tests {
         let a = StationId(0);
         let b = StationId(1);
 
-        let view = RestrictionView::from_constraints([OperationalConstraint::TrackUnavailable {
+        let view = ConstraintView::from_constraints([OperationalConstraint::TrackUnavailable {
             from: a,
             to: b,
         }]);
@@ -98,7 +98,7 @@ mod tests {
         let b = StationId(1);
 
         let view =
-            RestrictionView::from_constraints([OperationalConstraint::StationDeparturesBlocked {
+            ConstraintView::from_constraints([OperationalConstraint::StationDeparturesBlocked {
                 station: b,
             }]);
 
@@ -111,7 +111,7 @@ mod tests {
         let a = StationId(0);
         let b = StationId(1);
 
-        let view = RestrictionView::from_constraints([OperationalConstraint::StationUnavailable {
+        let view = ConstraintView::from_constraints([OperationalConstraint::StationUnavailable {
             station: b,
         }]);
 
@@ -125,7 +125,7 @@ mod tests {
         let b = StationId(1);
         let c = StationId(2);
 
-        let view = RestrictionView::from_constraints([
+        let view = ConstraintView::from_constraints([
             OperationalConstraint::TrackUnavailable { from: a, to: b },
             OperationalConstraint::StationDeparturesBlocked { station: b },
             OperationalConstraint::StationUnavailable { station: c },
@@ -137,11 +137,11 @@ mod tests {
     }
 
     #[test]
-    fn empty_restriction_view_contains_no_restrictions() {
+    fn empty_constraint_view_contains_no_constraints() {
         let a = StationId(0);
         let b = StationId(1);
 
-        let view = RestrictionView::from_constraints([]);
+        let view = ConstraintView::from_constraints([]);
 
         assert!(!view.track_unavailable(a, b));
         assert!(!view.station_departures_blocked(a));

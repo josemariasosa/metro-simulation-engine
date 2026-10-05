@@ -46,7 +46,7 @@ The sandbox should make core behavior easy to understand visually:
 
 Use the sandbox to **dogfood the public `metro-core` API**.
 
-`metro-bevy` must not depend on private domain internals such as `ResourceView` or `RestrictionView`. If useful visualization or control requires breaking encapsulation, treat that as feedback about the public core boundary rather than bypassing it.
+`metro-bevy` must not depend on private domain internals such as `ResourceView` or `ConstraintView`. If useful visualization or control requires breaking encapsulation, treat that as feedback about the public core boundary rather than bypassing it.
 
 ## Non-goals
 

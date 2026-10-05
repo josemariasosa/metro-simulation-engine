@@ -152,7 +152,7 @@ Do not insert fake trains, sentinel owners, external owners, or synthetic statio
 reservations. Do not persist a second ownership registry or move external state
 into `Train`, `Station`, or `Track`.
 
-Introduce a small crate-private domain `RestrictionView` with membership queries
+Introduce a small crate-private domain `ConstraintView` with membership queries
 for closed directed tracks, blocked station departures, and unavailable stations.
 It contains operational values only, with no record IDs, expiry scheduling, source
 metadata, clock access, or knowledge of `Simulation`. Simulation derives this
@@ -354,7 +354,7 @@ public clock or topology are unsupported runtime behavior, not scheduling APIs.
 
 For World N committed at timestamp T, the automatic pipeline MUST remain:
 
-1. Derive physical `ResourceView` from World N and one immutable `RestrictionView`
+1. Derive physical `ResourceView` from World N and one immutable `ConstraintView`
    from records active at T. Collect eligible candidates with the existing selector.
 2. Resolve every proposal in ascending numeric train ID against those frozen views
    and the application-owned accepted-track/destination-slot sets.
@@ -370,7 +370,7 @@ including when its train departs. Accepted claims still prevent batch contention
 
 Only departure admission gains operational input. Identity, eligibility, proposal
 ordering, clocks, record lifecycle and orchestration remain in application.
-`RestrictionView` receives active operational values, never application records.
+`ConstraintView` receives active operational values, never application records.
 
 Manual validation order remains unknown train → control mode → moving no-op →
 candidate selection → combined admission → commit. For each command, derive views
@@ -532,7 +532,7 @@ publishes both APIs when behavior is wired. Do not ship intermediate checkpoints
 as the completed feature. Snapshot visibility follows in checkpoint 6; this staged
 construction is deliberate, not an alternative final observation contract.
 
-### 1. Operational domain vocabulary and RestrictionView
+### 1. Operational domain vocabulary and ConstraintView
 
 - **Scope:** Three `OperationalConstraint` variants and private concrete membership
   view in domain. No application IDs or time.
@@ -653,7 +653,7 @@ Architectural consistency review against commit `5381e1a`:
 
 | Repository boundary | Revised contract |
 | --- | --- |
-| Private domain and pure departure helper | Operational values and predicates only; no Simulation, IDs, origins, clocks or records in RestrictionView. |
+| Private domain and pure departure helper | Operational values and predicates only; no Simulation, IDs, origins, clocks or records in ConstraintView. |
 | Generic ResourceView owners | Physical claims only; closures neither occupy nor mutate resources/topology. |
 | Shared manual/automatic admission | Same combined predicate; retain serial manual order versus numeric-ID batch arbitration. |
 | Simulation-owned orchestration | Identity, checked conversion, storage, interval filtering, pruning, proposal ordering and time remain application concerns. |

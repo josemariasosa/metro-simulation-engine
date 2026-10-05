@@ -1,4 +1,4 @@
-use crate::domain::constraint::RestrictionView;
+use crate::domain::constraint::ConstraintView;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
@@ -37,11 +37,11 @@ pub(crate) fn select_departure_candidate(
 pub(crate) fn can_admit_departure<Owner: Copy>(
     candidate: &DepartureCandidate,
     resources: &ResourceView<Owner>,
-    restrictions: &RestrictionView,
+    constraints: &ConstraintView,
 ) -> bool {
     resources.track_available(candidate.from, candidate.to)
         && resources.station_slot_available(candidate.to, candidate.direction)
-        && restrictions.permits_departure(candidate.from, candidate.to)
+        && constraints.permits_departure(candidate.from, candidate.to)
 }
 
 #[cfg(test)]
@@ -76,31 +76,31 @@ mod tests {
     }
 
     #[test]
-    fn empty_restrictions_admit_physically_available_departure() {
+    fn empty_constraints_admit_physically_available_departure() {
         let candidate = candidate();
         let resources = ResourceView::<usize>::default();
-        let restrictions = RestrictionView::default();
+        let constraints = ConstraintView::default();
 
         assert!(resources.track_available(candidate.from, candidate.to));
         assert!(resources.station_slot_available(candidate.to, candidate.direction));
-        assert!(can_admit_departure(&candidate, &resources, &restrictions));
+        assert!(can_admit_departure(&candidate, &resources, &constraints));
     }
 
     #[test]
-    fn exact_directed_track_restriction_does_not_block_reverse_edge() {
+    fn exact_directed_track_constraint_does_not_block_reverse_edge() {
         let a = StationId(0);
         let b = StationId(1);
         let forward = candidate_between(a, b);
         let reverse = candidate_between(b, a);
         let resources = ResourceView::<usize>::default();
-        let restrictions =
-            RestrictionView::from_constraints([OperationalConstraint::TrackUnavailable {
+        let constraints =
+            ConstraintView::from_constraints([OperationalConstraint::TrackUnavailable {
                 from: a,
                 to: b,
             }]);
 
-        assert!(can_admit_departure(&reverse, &resources, &restrictions));
-        assert!(!can_admit_departure(&forward, &resources, &restrictions));
+        assert!(can_admit_departure(&reverse, &resources, &constraints));
+        assert!(!can_admit_departure(&forward, &resources, &constraints));
     }
 
     #[test]
@@ -110,13 +110,13 @@ mod tests {
         let from_a = candidate_between(a, b);
         let from_b = candidate_between(b, a);
         let resources = ResourceView::<usize>::default();
-        let restrictions =
-            RestrictionView::from_constraints([OperationalConstraint::StationDeparturesBlocked {
+        let constraints =
+            ConstraintView::from_constraints([OperationalConstraint::StationDeparturesBlocked {
                 station: b,
             }]);
 
-        assert!(can_admit_departure(&from_a, &resources, &restrictions));
-        assert!(!can_admit_departure(&from_b, &resources, &restrictions));
+        assert!(can_admit_departure(&from_a, &resources, &constraints));
+        assert!(!can_admit_departure(&from_b, &resources, &constraints));
     }
 
     #[test]
@@ -126,20 +126,20 @@ mod tests {
         let from_a = candidate_between(a, b);
         let from_b = candidate_between(b, a);
         let resources = ResourceView::<usize>::default();
-        let restrictions =
-            RestrictionView::from_constraints([OperationalConstraint::StationUnavailable {
+        let constraints =
+            ConstraintView::from_constraints([OperationalConstraint::StationUnavailable {
                 station: b,
             }]);
 
-        assert!(!can_admit_departure(&from_a, &resources, &restrictions));
-        assert!(!can_admit_departure(&from_b, &resources, &restrictions));
+        assert!(!can_admit_departure(&from_a, &resources, &constraints));
+        assert!(!can_admit_departure(&from_b, &resources, &constraints));
     }
 
     #[test]
-    fn matching_and_unrelated_restrictions_compose_as_blocking_or() {
+    fn matching_and_unrelated_constraints_compose_as_blocking_or() {
         let candidate = candidate();
         let resources = ResourceView::<usize>::default();
-        let restrictions = RestrictionView::from_constraints([
+        let constraints = ConstraintView::from_constraints([
             OperationalConstraint::TrackUnavailable {
                 from: candidate.from,
                 to: candidate.to,
@@ -149,30 +149,30 @@ mod tests {
             },
         ]);
 
-        assert!(!can_admit_departure(&candidate, &resources, &restrictions));
+        assert!(!can_admit_departure(&candidate, &resources, &constraints));
     }
 
     #[test]
     fn physical_and_operational_denials_both_reject_shared_admission() {
         let candidate = candidate();
-        let unrelated_restrictions =
-            RestrictionView::from_constraints([OperationalConstraint::StationUnavailable {
+        let unrelated_constraints =
+            ConstraintView::from_constraints([OperationalConstraint::StationUnavailable {
                 station: StationId(2),
             }]);
         let track_occupant =
             moving_train(candidate.from, candidate.to, candidate.direction.reverse());
         let physically_denied = ResourceView::derive([(1, &track_occupant)]);
 
-        assert!(unrelated_restrictions.permits_departure(candidate.from, candidate.to));
+        assert!(unrelated_constraints.permits_departure(candidate.from, candidate.to));
         assert!(!can_admit_departure(
             &candidate,
             &physically_denied,
-            &unrelated_restrictions
+            &unrelated_constraints
         ));
 
         let physically_available = ResourceView::<usize>::default();
         let operationally_denied =
-            RestrictionView::from_constraints([OperationalConstraint::TrackUnavailable {
+            ConstraintView::from_constraints([OperationalConstraint::TrackUnavailable {
                 from: candidate.from,
                 to: candidate.to,
             }]);
@@ -200,8 +200,8 @@ mod tests {
             DwellPolicy::default_dwell_seconds(),
         );
         let selected = select_departure_candidate(&network, b, Direction::Forward).unwrap();
-        let restrictions =
-            RestrictionView::from_constraints([OperationalConstraint::TrackUnavailable {
+        let constraints =
+            ConstraintView::from_constraints([OperationalConstraint::TrackUnavailable {
                 from: b,
                 to: c,
             }]);
@@ -211,7 +211,7 @@ mod tests {
             (selected.from, selected.to, selected.direction),
             (b, c, Direction::Forward)
         );
-        assert!(!can_admit_departure(&selected, &resources, &restrictions));
+        assert!(!can_admit_departure(&selected, &resources, &constraints));
         assert_eq!(train.direction(), Direction::Forward);
         assert!(matches!(train.state(), TrainState::AtStation { station, .. } if station == b));
     }
@@ -229,8 +229,8 @@ mod tests {
             DwellPolicy::default_dwell_seconds(),
         );
         let selected = select_departure_candidate(&network, b, Direction::Forward).unwrap();
-        let restrictions =
-            RestrictionView::from_constraints([OperationalConstraint::TrackUnavailable {
+        let constraints =
+            ConstraintView::from_constraints([OperationalConstraint::TrackUnavailable {
                 from: b,
                 to: a,
             }]);
@@ -240,7 +240,7 @@ mod tests {
             (selected.from, selected.to, selected.direction),
             (b, a, Direction::Backward)
         );
-        assert!(!can_admit_departure(&selected, &resources, &restrictions));
+        assert!(!can_admit_departure(&selected, &resources, &constraints));
         assert_eq!(train.direction(), Direction::Forward);
         assert!(matches!(train.state(), TrainState::AtStation { station, .. } if station == b));
     }
@@ -250,11 +250,11 @@ mod tests {
         let candidate = candidate();
         let reservation = moving_train(StationId(2), candidate.to, candidate.direction);
         let resources = ResourceView::derive([(1, &reservation)]);
-        let restrictions = RestrictionView::default();
+        let constraints = ConstraintView::default();
 
         assert!(resources.track_available(candidate.from, candidate.to));
         assert!(!resources.station_slot_available(candidate.to, candidate.direction));
-        assert!(!can_admit_departure(&candidate, &resources, &restrictions));
+        assert!(!can_admit_departure(&candidate, &resources, &constraints));
     }
 
     #[test]
@@ -263,10 +263,10 @@ mod tests {
         let track_occupant =
             moving_train(candidate.from, candidate.to, candidate.direction.reverse());
         let resources = ResourceView::derive([(1, &track_occupant)]);
-        let restrictions = RestrictionView::default();
+        let constraints = ConstraintView::default();
 
         assert!(!resources.track_available(candidate.from, candidate.to));
         assert!(resources.station_slot_available(candidate.to, candidate.direction));
-        assert!(!can_admit_departure(&candidate, &resources, &restrictions));
+        assert!(!can_admit_departure(&candidate, &resources, &constraints));
     }
 }
