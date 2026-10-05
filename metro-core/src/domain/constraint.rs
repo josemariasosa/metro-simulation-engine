@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::domain::station::StationId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OperationalConstraint {
+pub(crate) enum OperationalConstraint {
     TrackUnavailable { from: StationId, to: StationId },
     StationDeparturesBlocked { station: StationId },
     StationUnavailable { station: StationId },
@@ -26,7 +26,9 @@ impl Default for RestrictionView {
 }
 
 impl RestrictionView {
-    fn from_constraints(constraints: impl IntoIterator<Item = OperationalConstraint>) -> Self {
+    pub(crate) fn from_constraints(
+        constraints: impl IntoIterator<Item = OperationalConstraint>,
+    ) -> Self {
         let mut unavailable_tracks = HashSet::new();
         let mut blocked_departure_stations = HashSet::new();
         let mut unavailable_stations = HashSet::new();
