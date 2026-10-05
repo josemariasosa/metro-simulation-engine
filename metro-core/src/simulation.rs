@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use crate::command::{CommandError, TrainCommand};
-use crate::domain::constraint::ConstraintView;
+use crate::domain::constraint::{
+    ConstraintError, ConstraintId, ConstraintOrigin, ConstraintRecord, ConstraintView,
+    OperationalConstraint,
+};
 use crate::domain::departure::DepartureCandidate;
 use crate::domain::departure::{can_admit_departure, select_departure_candidate};
 use crate::domain::dwell::DwellPolicy;
@@ -37,6 +40,8 @@ pub struct Simulation {
     trains: Vec<TrainEntity>,
     dwell_policy: DwellPolicy,
     next_train_id: usize,
+    constraints: Vec<ConstraintRecord>,
+    next_constraint_id: u64,
 }
 
 fn dwelling_snapshot_state(
@@ -63,6 +68,8 @@ impl Simulation {
             trains: Vec::new(),
             dwell_policy,
             next_train_id: 0,
+            constraints: Vec::new(),
+            next_constraint_id: 0,
         };
 
         for train in trains {
@@ -94,6 +101,85 @@ impl Simulation {
         self.trains.push(train_entity);
 
         id
+    }
+
+    /// Registers a constraint over `[start_at, end_at)`; any failure leaves state untouched.
+    // Crate-private until live admission is wired.
+    #[allow(dead_code)]
+    pub(crate) fn create_constraint_at(
+        &mut self,
+        constraint: OperationalConstraint,
+        start_at: u64,
+        end_at: Option<u64>,
+        origin: ConstraintOrigin,
+    ) -> Result<ConstraintId, ConstraintError> {
+        if start_at <= self.elapsed_seconds {
+            return Err(ConstraintError::InvalidStart);
+        }
+        if end_at.is_some_and(|end| end <= start_at) {
+            return Err(ConstraintError::InvalidEnd);
+        }
+        self.validate_constraint_target(constraint)?;
+        let next_constraint_id = self
+            .next_constraint_id
+            .checked_add(1)
+            .ok_or(ConstraintError::IdExhausted)?;
+
+        let id = ConstraintId(self.next_constraint_id);
+        self.next_constraint_id = next_constraint_id;
+        self.constraints.push(ConstraintRecord {
+            id,
+            constraint,
+            start_at,
+            end_at,
+            origin,
+        });
+        Ok(id)
+    }
+
+    /// Removes a scheduled or active constraint immediately.
+    #[allow(dead_code)]
+    pub(crate) fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), ConstraintError> {
+        let index = self
+            .constraints
+            .iter()
+            .position(|record| record.id == id)
+            .ok_or(ConstraintError::UnknownConstraint)?;
+        self.constraints.remove(index);
+        Ok(())
+    }
+
+    fn validate_constraint_target(
+        &self,
+        constraint: OperationalConstraint,
+    ) -> Result<(), ConstraintError> {
+        let known = |station: StationId| station.0 < self.network.station_count();
+        match constraint {
+            OperationalConstraint::StationDeparturesBlocked { station }
+            | OperationalConstraint::StationUnavailable { station } => known(station)
+                .then_some(())
+                .ok_or(ConstraintError::UnknownStation),
+            OperationalConstraint::TrackUnavailable { from, to } => {
+                if !known(from) || !known(to) {
+                    return Err(ConstraintError::UnknownStation);
+                }
+                self.network
+                    .track(from, to)
+                    .map(|_| ())
+                    .ok_or(ConstraintError::UnknownTrack)
+            }
+        }
+    }
+
+    /// Operational values active at the current time; the only input for admission views.
+    #[allow(dead_code)]
+    pub(crate) fn active_constraint_view(&self) -> ConstraintView {
+        ConstraintView::from_constraints(
+            self.constraints
+                .iter()
+                .filter(|record| record.is_active(self.elapsed_seconds))
+                .map(|record| record.constraint),
+        )
     }
 
     /// Applies a command without advancing time. Rejections leave state unchanged.
@@ -324,6 +410,8 @@ impl Simulation {
             }
         }
         self.elapsed_seconds += 1;
+        let now = self.elapsed_seconds;
+        self.constraints.retain(|record| !record.is_expired(now));
     }
 
     #[cfg(test)]
@@ -1749,5 +1837,400 @@ mod tests {
                 remaining_seconds: 3,
             }
         );
+    }
+
+    fn constraint_simulation() -> (Simulation, [StationId; 3]) {
+        let SimulationFixture {
+            network,
+            stations,
+            dwell_policy,
+        } = SimulationFixture::new(["A", "B", "C"], 2);
+        let train = Train::new(100, stations[0], Direction::Forward, 3);
+        (
+            Simulation::new(network, vec![train], dwell_policy),
+            stations,
+        )
+    }
+
+    fn closed(station: StationId) -> OperationalConstraint {
+        OperationalConstraint::StationUnavailable { station }
+    }
+
+    fn assert_constraint_failure_atomic(
+        simulation: &mut Simulation,
+        expected: ConstraintError,
+        register: impl FnOnce(&mut Simulation) -> Result<ConstraintId, ConstraintError>,
+    ) {
+        let snapshot = simulation.snapshot();
+        let records = simulation.constraints.clone();
+        let next_id = simulation.next_constraint_id;
+
+        assert_eq!(register(simulation), Err(expected));
+
+        assert_eq!(simulation.snapshot(), snapshot);
+        assert_eq!(simulation.constraints, records);
+        assert_eq!(simulation.next_constraint_id, next_id);
+    }
+
+    #[test]
+    fn new_simulation_has_empty_constraint_registry() {
+        let (simulation, _) = constraint_simulation();
+
+        assert!(simulation.constraints.is_empty());
+        assert_eq!(simulation.next_constraint_id, 0);
+    }
+
+    #[test]
+    fn registration_stores_exact_canonical_record_for_both_origins() {
+        let (mut simulation, [a, b, _]) = constraint_simulation();
+        let track = OperationalConstraint::TrackUnavailable { from: a, to: b };
+
+        let planned = simulation
+            .create_constraint_at(track, 1, Some(5), ConstraintOrigin::Planned)
+            .unwrap();
+        let injected = simulation
+            .create_constraint_at(closed(b), 7, None, ConstraintOrigin::Injected)
+            .unwrap();
+
+        assert_eq!(
+            simulation.constraints,
+            vec![
+                ConstraintRecord {
+                    id: planned,
+                    constraint: track,
+                    start_at: 1,
+                    end_at: Some(5),
+                    origin: ConstraintOrigin::Planned,
+                },
+                ConstraintRecord {
+                    id: injected,
+                    constraint: closed(b),
+                    start_at: 7,
+                    end_at: None,
+                    origin: ConstraintOrigin::Injected,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn start_must_be_strictly_after_current_time() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::InvalidStart, |s| {
+            s.create_constraint_at(closed(a), 0, None, ConstraintOrigin::Planned)
+        });
+        assert!(
+            simulation
+                .create_constraint_at(closed(a), 1, None, ConstraintOrigin::Planned)
+                .is_ok()
+        );
+
+        simulation.step();
+        simulation.step();
+        for start in [1, 2] {
+            assert_constraint_failure_atomic(&mut simulation, ConstraintError::InvalidStart, |s| {
+                s.create_constraint_at(closed(a), start, None, ConstraintOrigin::Planned)
+            });
+        }
+        assert!(
+            simulation
+                .create_constraint_at(closed(a), 3, None, ConstraintOrigin::Planned)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn finite_end_must_be_after_start() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+
+        for end in [5, 4, 0] {
+            assert_constraint_failure_atomic(&mut simulation, ConstraintError::InvalidEnd, |s| {
+                s.create_constraint_at(closed(a), 5, Some(end), ConstraintOrigin::Planned)
+            });
+        }
+        assert!(
+            simulation
+                .create_constraint_at(closed(a), 5, Some(6), ConstraintOrigin::Planned)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn validation_follows_spec_precedence() {
+        let (mut simulation, [a, b, _]) = constraint_simulation();
+        let unknown = StationId(99);
+        // An exhausted allocator must not mask any earlier validation error.
+        simulation.next_constraint_id = u64::MAX;
+        let missing_track = OperationalConstraint::TrackUnavailable {
+            from: a,
+            to: unknown,
+        };
+
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::InvalidStart, |s| {
+            s.create_constraint_at(missing_track, 0, Some(0), ConstraintOrigin::Planned)
+        });
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::InvalidEnd, |s| {
+            s.create_constraint_at(missing_track, 5, Some(5), ConstraintOrigin::Planned)
+        });
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::UnknownStation, |s| {
+            s.create_constraint_at(missing_track, 5, None, ConstraintOrigin::Planned)
+        });
+        let no_edge = OperationalConstraint::TrackUnavailable {
+            from: a,
+            to: StationId(2),
+        };
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::UnknownTrack, |s| {
+            s.create_constraint_at(no_edge, 5, None, ConstraintOrigin::Planned)
+        });
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::IdExhausted, |s| {
+            s.create_constraint_at(closed(b), 5, None, ConstraintOrigin::Planned)
+        });
+    }
+
+    #[test]
+    fn unknown_station_targets_are_rejected_without_mutation() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+        let unknown = StationId(3);
+        let targets = [
+            OperationalConstraint::StationDeparturesBlocked { station: unknown },
+            OperationalConstraint::StationUnavailable { station: unknown },
+            OperationalConstraint::TrackUnavailable {
+                from: unknown,
+                to: a,
+            },
+            OperationalConstraint::TrackUnavailable {
+                from: a,
+                to: unknown,
+            },
+            OperationalConstraint::TrackUnavailable {
+                from: unknown,
+                to: StationId(4),
+            },
+        ];
+
+        for target in targets {
+            assert_constraint_failure_atomic(
+                &mut simulation,
+                ConstraintError::UnknownStation,
+                |s| s.create_constraint_at(target, 5, None, ConstraintOrigin::Planned),
+            );
+        }
+    }
+
+    #[test]
+    fn track_target_requires_exact_directed_edge() {
+        let mut network = Network::new();
+        let a = network.add_station("A");
+        let b = network.add_station("B");
+        network.add_track(b, a, 2);
+        let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::UnknownTrack, |s| {
+            let forward = OperationalConstraint::TrackUnavailable { from: a, to: b };
+            s.create_constraint_at(forward, 5, None, ConstraintOrigin::Planned)
+        });
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::UnknownTrack, |s| {
+            let same = OperationalConstraint::TrackUnavailable { from: a, to: a };
+            s.create_constraint_at(same, 5, None, ConstraintOrigin::Planned)
+        });
+        let reverse = OperationalConstraint::TrackUnavailable { from: b, to: a };
+        assert!(
+            simulation
+                .create_constraint_at(reverse, 5, None, ConstraintOrigin::Planned)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn ids_are_monotonic_distinct_and_not_consumed_by_failures() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+
+        let first = simulation
+            .create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
+            .unwrap();
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::InvalidStart, |s| {
+            s.create_constraint_at(closed(a), 0, None, ConstraintOrigin::Planned)
+        });
+        let duplicate = simulation
+            .create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
+            .unwrap();
+
+        assert_eq!((first, duplicate), (ConstraintId(0), ConstraintId(1)));
+        assert_eq!(simulation.constraints.len(), 2);
+        assert_eq!(
+            simulation.constraints[0].constraint,
+            simulation.constraints[1].constraint
+        );
+    }
+
+    #[test]
+    fn id_exhaustion_fails_before_mutation_and_last_id_is_never_issued() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+        simulation.next_constraint_id = u64::MAX - 1;
+
+        let last = simulation
+            .create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
+            .unwrap();
+        assert_eq!(last, ConstraintId(u64::MAX - 1));
+
+        assert_constraint_failure_atomic(&mut simulation, ConstraintError::IdExhausted, |s| {
+            s.create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
+        });
+    }
+
+    #[test]
+    fn removal_cancels_scheduled_and_active_records_without_reusing_ids() {
+        let (mut simulation, [a, b, _]) = constraint_simulation();
+        let scheduled = simulation
+            .create_constraint_at(closed(a), 10, None, ConstraintOrigin::Planned)
+            .unwrap();
+        let active = simulation
+            .create_constraint_at(closed(b), 1, None, ConstraintOrigin::Injected)
+            .unwrap();
+        simulation.step();
+        let trains_before = simulation.snapshot();
+
+        assert_eq!(simulation.remove_constraint(scheduled), Ok(()));
+        assert_eq!(simulation.remove_constraint(active), Ok(()));
+
+        assert!(simulation.constraints.is_empty());
+        assert_eq!(simulation.snapshot(), trains_before);
+        assert_eq!(
+            simulation.remove_constraint(scheduled),
+            Err(ConstraintError::UnknownConstraint)
+        );
+        assert_eq!(
+            simulation.remove_constraint(active),
+            Err(ConstraintError::UnknownConstraint)
+        );
+        assert_eq!(
+            simulation.create_constraint_at(closed(a), 10, None, ConstraintOrigin::Planned),
+            Ok(ConstraintId(2))
+        );
+    }
+
+    #[test]
+    fn unknown_removal_preserves_registry_and_state() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+        simulation
+            .create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
+            .unwrap();
+        let snapshot = simulation.snapshot();
+        let records = simulation.constraints.clone();
+
+        assert_eq!(
+            simulation.remove_constraint(ConstraintId(7)),
+            Err(ConstraintError::UnknownConstraint)
+        );
+
+        assert_eq!(simulation.snapshot(), snapshot);
+        assert_eq!(simulation.constraints, records);
+        assert_eq!(simulation.next_constraint_id, 1);
+    }
+
+    #[test]
+    fn removing_one_duplicate_leaves_the_other() {
+        let (mut simulation, [a, ..]) = constraint_simulation();
+        let first = simulation
+            .create_constraint_at(closed(a), 1, None, ConstraintOrigin::Planned)
+            .unwrap();
+        let second = simulation
+            .create_constraint_at(closed(a), 1, None, ConstraintOrigin::Planned)
+            .unwrap();
+        simulation.step();
+
+        simulation.remove_constraint(first).unwrap();
+
+        assert_eq!(simulation.constraints.len(), 1);
+        assert_eq!(simulation.constraints[0].id, second);
+        assert!(
+            !simulation
+                .active_constraint_view()
+                .permits_departure(a, StationId(1))
+        );
+    }
+
+    #[test]
+    fn active_view_contains_only_constraints_active_at_current_time() {
+        let (mut simulation, [a, b, c]) = constraint_simulation();
+        simulation
+            .create_constraint_at(closed(a), 1, Some(3), ConstraintOrigin::Planned)
+            .unwrap();
+        simulation
+            .create_constraint_at(closed(c), 2, None, ConstraintOrigin::Injected)
+            .unwrap();
+
+        // (time, a blocked, c blocked) using a->b and b->c departures.
+        for (time, a_blocked, c_blocked) in [
+            (0, false, false),
+            (1, true, false),
+            (2, true, true),
+            (3, false, true),
+            (4, false, true),
+        ] {
+            while simulation.elapsed_seconds < time {
+                simulation.step();
+            }
+            let view = simulation.active_constraint_view();
+            assert_eq!(!view.permits_departure(a, b), a_blocked, "a at {time}");
+            assert_eq!(!view.permits_departure(b, c), c_blocked, "c at {time}");
+        }
+    }
+
+    #[test]
+    fn step_prunes_expired_records_at_new_time_and_keeps_scheduled_ones() {
+        let (mut simulation, [a, b, _]) = constraint_simulation();
+        let finite = simulation
+            .create_constraint_at(closed(a), 1, Some(3), ConstraintOrigin::Planned)
+            .unwrap();
+        let indefinite = simulation
+            .create_constraint_at(closed(a), 1, None, ConstraintOrigin::Planned)
+            .unwrap();
+        let scheduled = simulation
+            .create_constraint_at(closed(b), 9, Some(10), ConstraintOrigin::Planned)
+            .unwrap();
+
+        simulation.step();
+        simulation.step();
+        assert_eq!(simulation.constraints.len(), 3);
+        // Observation must not prune.
+        simulation.snapshot();
+        assert_eq!(simulation.constraints.len(), 3);
+
+        simulation.step();
+        let ids: Vec<_> = simulation.constraints.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![indefinite, scheduled]);
+        assert_eq!(
+            simulation.remove_constraint(finite),
+            Err(ConstraintError::UnknownConstraint)
+        );
+        assert_eq!(
+            simulation.create_constraint_at(closed(a), 10, None, ConstraintOrigin::Planned),
+            Ok(ConstraintId(3))
+        );
+    }
+
+    #[test]
+    fn stepping_with_constraints_matches_stepping_without_them() {
+        let (mut plain, _) = constraint_simulation();
+        let (mut constrained, [a, b, _]) = constraint_simulation();
+        constrained
+            .create_constraint_at(closed(a), 1, Some(4), ConstraintOrigin::Planned)
+            .unwrap();
+        constrained
+            .create_constraint_at(
+                OperationalConstraint::TrackUnavailable { from: a, to: b },
+                2,
+                None,
+                ConstraintOrigin::Injected,
+            )
+            .unwrap();
+
+        for _ in 0..8 {
+            plain.step();
+            constrained.step();
+            assert_eq!(constrained.snapshot(), plain.snapshot());
+        }
     }
 }

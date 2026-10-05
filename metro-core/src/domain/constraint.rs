@@ -22,17 +22,22 @@ pub enum ConstraintError {
     UnknownConstraint,
 }
 
-struct ConstraintRecord {
-    id: ConstraintId,
-    constraint: OperationalConstraint,
-    start_at: u64,
-    end_at: Option<u64>,
-    origin: ConstraintOrigin,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConstraintRecord {
+    pub(crate) id: ConstraintId,
+    pub(crate) constraint: OperationalConstraint,
+    pub(crate) start_at: u64,
+    pub(crate) end_at: Option<u64>,
+    pub(crate) origin: ConstraintOrigin,
 }
 
 impl ConstraintRecord {
-    fn is_active(&self, now: u64) -> bool {
+    pub(crate) fn is_active(&self, now: u64) -> bool {
         self.start_at <= now && self.end_at.is_none_or(|end| now < end)
+    }
+
+    pub(crate) fn is_expired(&self, now: u64) -> bool {
+        self.end_at.is_some_and(|end| now >= end)
     }
 }
 
@@ -199,5 +204,25 @@ mod tests {
         assert!(record.is_active(11));
         assert!(record.is_active(14));
         assert!(!record.is_active(15));
+    }
+
+    #[test]
+    fn indefinite_constraint_remains_active_after_start() {
+        let record = ConstraintRecord {
+            id: ConstraintId(0),
+            constraint: OperationalConstraint::StationUnavailable {
+                station: StationId(0),
+            },
+            start_at: 11,
+            end_at: None,
+            origin: ConstraintOrigin::Injected,
+        };
+
+        assert!(!record.is_active(0));
+        assert!(!record.is_active(10));
+        assert!(record.is_active(11));
+        assert!(record.is_active(12));
+        assert!(record.is_active(u64::MAX));
+        assert!(!record.is_expired(u64::MAX));
     }
 }
