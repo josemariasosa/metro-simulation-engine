@@ -1,4 +1,4 @@
-use crate::simulation::TrainId;
+use crate::domain::train::TrainId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrainCommand {

@@ -1,7 +1,6 @@
 use crate::domain::station::StationId;
 use crate::domain::train::Direction;
-use crate::simulation::TrainId;
-
+use crate::domain::train::TrainId;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationSnapshot {
     pub elapsed_seconds: u64,

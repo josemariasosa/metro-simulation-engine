@@ -1,9 +1,9 @@
 use metro_core::DwellPolicy;
 use metro_core::Network;
 use metro_core::StationId;
-use metro_core::simulation::{Simulation, TrainId};
+use metro_core::simulation::Simulation;
 use metro_core::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
-use metro_core::{Direction, Train};
+use metro_core::{Direction, Train, TrainId};
 
 fn test_simulation(travel_seconds: u64) -> Simulation {
     let mut network = Network::new();

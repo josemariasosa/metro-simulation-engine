@@ -60,9 +60,8 @@ pub(super) fn drive_core(
 mod tests {
     use super::*;
     use crate::scenario::{PlayerTrain, ScenarioStations, initialize_scenario};
-    use metro_core::Direction;
-    use metro_core::simulation::TrainId;
     use metro_core::snapshot::{TrainSnapshot, TrainSnapshotState};
+    use metro_core::{Direction, TrainId};
 
     #[test]
     fn accumulator_consumes_whole_seconds_and_retains_remainder() {

@@ -4,8 +4,8 @@ use crate::domain::dwell::DwellPolicy;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
-use crate::domain::train::{AtStationState, Direction, Train, TrainState};
-use crate::simulation::{Simulation, TrainEntity, TrainId};
+use crate::domain::train::{AtStationState, Direction, Train, TrainId, TrainState};
+use crate::simulation::{Simulation, TrainEntity};
 use crate::test_utils::utils::{assert_claims, assert_physical_invariants};
 
 use Direction::{Backward as B, Forward as F};

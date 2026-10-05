@@ -2,9 +2,9 @@ use metro_core::DwellPolicy;
 use metro_core::Network;
 use metro_core::StationId;
 use metro_core::command::{CommandError, TrainCommand};
-use metro_core::simulation::{Simulation, TrainEntity, TrainId};
+use metro_core::simulation::{Simulation, TrainEntity};
 use metro_core::snapshot::TrainSnapshotState;
-use metro_core::{AtStationState, Direction, Train, TrainState};
+use metro_core::{AtStationState, Direction, Train, TrainId, TrainState};
 
 fn manual_a_b_simulation() -> Simulation {
     manual_a_b_simulation_with_travel_seconds(10)

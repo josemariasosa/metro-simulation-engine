@@ -1,6 +1,9 @@
 use crate::domain::{departure::DepartureCandidate, station::StationId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TrainId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
     Forward,
     Backward,

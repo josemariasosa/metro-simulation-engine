@@ -10,4 +10,4 @@ pub use domain::dwell::DwellPolicy;
 pub use domain::network::Network;
 pub use domain::station::StationId;
 pub use domain::track::Track;
-pub use domain::train::{AtStationState, Direction, Train, TrainControl, TrainState};
+pub use domain::train::{AtStationState, Direction, Train, TrainControl, TrainId, TrainState};

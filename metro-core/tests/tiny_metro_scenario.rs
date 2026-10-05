@@ -1,8 +1,8 @@
 use metro_core::DwellPolicy;
 use metro_core::Network;
 use metro_core::StationId;
-use metro_core::simulation::{Simulation, TrainId};
-use metro_core::{AtStationState, Direction, Train, TrainState};
+use metro_core::simulation::Simulation;
+use metro_core::{AtStationState, Direction, Train, TrainId, TrainState};
 
 fn build_tiny_metro_network() -> (Network, [StationId; 5]) {
     let mut network = Network::new();

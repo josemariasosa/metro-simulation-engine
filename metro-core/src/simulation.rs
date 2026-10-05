@@ -7,11 +7,8 @@ use crate::domain::dwell::DwellPolicy;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
-use crate::domain::train::{AtStationState, Train, TrainState};
+use crate::domain::train::{AtStationState, Train, TrainId, TrainState};
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TrainId(pub usize);
 
 /// A train registered in a simulation, paired with its stable simulation identity.
 #[derive(Debug, Clone)]
