@@ -6,6 +6,9 @@ pub mod snapshot;
 #[cfg(test)]
 pub mod test_utils;
 
+pub use domain::constraint::{
+    ConstraintError, ConstraintId, ConstraintOrigin, OperationalConstraint,
+};
 pub use domain::dwell::DwellPolicy;
 pub use domain::network::Network;
 pub use domain::station::StationId;

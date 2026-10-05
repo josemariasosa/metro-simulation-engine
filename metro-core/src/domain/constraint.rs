@@ -42,7 +42,7 @@ impl ConstraintRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum OperationalConstraint {
+pub enum OperationalConstraint {
     TrackUnavailable { from: StationId, to: StationId },
     StationDeparturesBlocked { station: StationId },
     StationUnavailable { station: StationId },

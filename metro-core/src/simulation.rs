@@ -14,6 +14,9 @@ use crate::domain::station::StationId;
 use crate::domain::train::{AtStationState, Train, TrainId, TrainState};
 use crate::snapshot::{SimulationSnapshot, TrainSnapshot, TrainSnapshotState};
 
+#[cfg(test)]
+mod cp5_tests;
+
 /// A train registered in a simulation, paired with its stable simulation identity.
 #[derive(Debug, Clone)]
 pub struct TrainEntity {
@@ -104,9 +107,7 @@ impl Simulation {
     }
 
     /// Registers a constraint over `[start_at, end_at)`; any failure leaves state untouched.
-    // Crate-private until live admission is wired.
-    #[allow(dead_code)]
-    pub(crate) fn create_constraint_at(
+    pub fn create_constraint_at(
         &mut self,
         constraint: OperationalConstraint,
         start_at: u64,
@@ -138,9 +139,7 @@ impl Simulation {
     }
 
     /// Normalizes relative timing; duration runs from activation, not registration.
-    // Crate-private until live admission is wired.
-    #[allow(dead_code)]
-    pub(crate) fn create_constraint_in(
+    pub fn create_constraint_in(
         &mut self,
         constraint: OperationalConstraint,
         starts_in: u64,
@@ -170,8 +169,7 @@ impl Simulation {
     }
 
     /// Removes a scheduled or active constraint immediately.
-    #[allow(dead_code)]
-    pub(crate) fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), ConstraintError> {
+    pub fn remove_constraint(&mut self, id: ConstraintId) -> Result<(), ConstraintError> {
         let index = self
             .constraints
             .iter()
@@ -204,7 +202,6 @@ impl Simulation {
     }
 
     /// Operational values active at the current time; the only input for admission views.
-    #[allow(dead_code)]
     pub(crate) fn active_constraint_view(&self) -> ConstraintView {
         ConstraintView::from_constraints(
             self.constraints
@@ -239,7 +236,7 @@ impl Simulation {
                 let resources = ResourceView::derive(
                     self.trains.iter().map(|entity| (entity.id, &entity.train)),
                 );
-                let constraints = ConstraintView::default();
+                let constraints = self.active_constraint_view();
                 if !can_admit_departure(&candidate, &resources, &constraints) {
                     return Err(CommandError::Blocked);
                 }
@@ -345,7 +342,7 @@ impl Simulation {
         // World N stays immutable until every automatic departure is resolved.
         let starting_resources =
             ResourceView::derive(self.trains.iter().map(|entity| (entity.id, &entity.train)));
-        let constraints = ConstraintView::default();
+        let constraints = self.active_constraint_view();
         let mut proposals = Vec::new();
         for (train_index, train_entity) in self.trains.iter().enumerate() {
             let TrainEntity {
@@ -2405,28 +2402,5 @@ mod tests {
             simulation.create_constraint_at(closed(a), 10, None, ConstraintOrigin::Planned),
             Ok(ConstraintId(3))
         );
-    }
-
-    #[test]
-    fn stepping_with_constraints_matches_stepping_without_them() {
-        let (mut plain, _) = constraint_simulation();
-        let (mut constrained, [a, b, _]) = constraint_simulation();
-        constrained
-            .create_constraint_at(closed(a), 1, Some(4), ConstraintOrigin::Planned)
-            .unwrap();
-        constrained
-            .create_constraint_at(
-                OperationalConstraint::TrackUnavailable { from: a, to: b },
-                2,
-                None,
-                ConstraintOrigin::Injected,
-            )
-            .unwrap();
-
-        for _ in 0..8 {
-            plain.step();
-            constrained.step();
-            assert_eq!(constrained.snapshot(), plain.snapshot());
-        }
     }
 }
