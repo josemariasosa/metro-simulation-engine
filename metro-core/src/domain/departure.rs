@@ -2,7 +2,19 @@ use crate::domain::constraint::ConstraintView;
 use crate::domain::network::Network;
 use crate::domain::resource::ResourceView;
 use crate::domain::station::StationId;
-use crate::domain::train::Direction;
+use crate::domain::train::{Direction, TrainId};
+
+pub(crate) struct AutomaticDepartureProposal {
+    pub(crate) train_index: usize,
+    pub(crate) train_id: TrainId,
+    pub(crate) candidate: DepartureCandidate,
+}
+
+pub(crate) enum AutomaticDepartureDecision {
+    NotEligible,
+    Accepted(DepartureCandidate),
+    Rejected { station: StationId },
+}
 
 pub(crate) struct DepartureCandidate {
     pub(crate) from: StationId,
@@ -52,7 +64,6 @@ mod tests {
     use crate::domain::network::Network;
     use crate::domain::resource::ResourceView;
     use crate::domain::train::{Direction, Train, TrainState};
-    use crate::test_utils::utils::moving_train;
 
     // Synthetic claims isolate each guard; real moving trains claim both resources.
     fn candidate() -> DepartureCandidate {
@@ -160,7 +171,7 @@ mod tests {
                 station: StationId(2),
             }]);
         let track_occupant =
-            moving_train(candidate.from, candidate.to, candidate.direction.reverse());
+            Train::moving_train(candidate.from, candidate.to, candidate.direction.reverse());
         let physically_denied = ResourceView::derive([(1, &track_occupant)]);
 
         assert!(unrelated_constraints.permits_departure(candidate.from, candidate.to));
@@ -248,7 +259,7 @@ mod tests {
     #[test]
     fn reserved_destination_alone_rejects_departure() {
         let candidate = candidate();
-        let reservation = moving_train(StationId(2), candidate.to, candidate.direction);
+        let reservation = Train::moving_train(StationId(2), candidate.to, candidate.direction);
         let resources = ResourceView::derive([(1, &reservation)]);
         let constraints = ConstraintView::default();
 
@@ -261,7 +272,7 @@ mod tests {
     fn occupied_track_alone_rejects_departure() {
         let candidate = candidate();
         let track_occupant =
-            moving_train(candidate.from, candidate.to, candidate.direction.reverse());
+            Train::moving_train(candidate.from, candidate.to, candidate.direction.reverse());
         let resources = ResourceView::derive([(1, &track_occupant)]);
         let constraints = ConstraintView::default();
 

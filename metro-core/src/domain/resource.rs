@@ -2,6 +2,12 @@ use crate::domain::station::StationId;
 use crate::domain::train::{Direction, Train, TrainState};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResourceConflict {
+    StationSlot(StationSlot),
+    Track(StationId, StationId),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StationSlot {
     pub(crate) station: StationId,
@@ -37,21 +43,30 @@ impl<Owner: Copy> ResourceView<Owner> {
             && !self.station_reservations.contains_key(&slot)
     }
 
-    fn reserve_station(&mut self, slot: StationSlot, owner: Owner) {
-        assert!(
-            !self.station_occupants.contains_key(&slot),
-            "station slot occupied and reserved"
-        );
-        assert!(
-            !self.station_reservations.contains_key(&slot),
-            "destination slot already reserved"
-        );
+    fn try_reserve_station(
+        &mut self,
+        slot: StationSlot,
+        owner: Owner,
+    ) -> Result<(), ResourceConflict> {
+        if self.station_occupants.contains_key(&slot)
+            || self.station_reservations.contains_key(&slot)
+        {
+            return Err(ResourceConflict::StationSlot(slot));
+        }
+
         self.station_reservations.insert(slot, owner);
+        Ok(())
     }
 
     /// Derives physical claims from domain trains paired with opaque owner tokens.
     /// The caller supplies identity; resource rules never interpret or order owners.
     pub(crate) fn derive<'a>(trains: impl IntoIterator<Item = (Owner, &'a Train)>) -> Self {
+        Self::try_derive(trains).expect("invalid resource ownership")
+    }
+
+    pub(crate) fn try_derive<'a>(
+        trains: impl IntoIterator<Item = (Owner, &'a Train)>,
+    ) -> Result<Self, ResourceConflict> {
         let mut view = Self::default();
         for (owner, train) in trains {
             match train.state() {
@@ -60,33 +75,33 @@ impl<Owner: Copy> ResourceView<Owner> {
                         station,
                         direction: train.direction(),
                     };
-                    assert!(
-                        !view.station_reservations.contains_key(&slot),
-                        "station slot occupied and reserved"
-                    );
-                    assert!(
-                        !view.station_occupants.contains_key(&slot),
-                        "station slot already occupied"
-                    );
+
+                    if view.station_reservations.contains_key(&slot)
+                        || view.station_occupants.contains_key(&slot)
+                    {
+                        return Err(ResourceConflict::StationSlot(slot));
+                    }
+
                     view.station_occupants.insert(slot, owner);
                 }
                 TrainState::Moving { from, to, .. } => {
-                    assert!(
-                        !view.track_occupants.contains_key(&(from, to)),
-                        "directed track already occupied"
-                    );
+                    if view.track_occupants.contains_key(&(from, to)) {
+                        return Err(ResourceConflict::Track(from, to));
+                    }
+
                     view.track_occupants.insert((from, to), owner);
-                    view.reserve_station(
+
+                    view.try_reserve_station(
                         StationSlot {
                             station: to,
                             direction: train.direction(),
                         },
                         owner,
-                    );
+                    )?;
                 }
             }
         }
-        view
+        Ok(view)
     }
 }
 
@@ -221,8 +236,12 @@ mod tests {
             station: StationId(1),
             direction: Direction::Forward,
         };
-        view.reserve_station(slot, 1);
-        view.reserve_station(slot, 2);
+
+        assert_eq!(view.try_reserve_station(slot, 1), Ok(()));
+        assert_eq!(
+            view.try_reserve_station(slot, 2),
+            Err(ResourceConflict::StationSlot(slot)),
+        );
     }
 
     #[test]

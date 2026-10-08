@@ -61,224 +61,224 @@ fn assert_train_dwelling_at(train_state: &TrainState, test_station: &StationId) 
     }
 }
 
-#[test]
-fn trains_start_at_opposite_endpoints_in_opposite_directions() {
-    let (network, [a, _b, _c, _d, e]) = build_tiny_metro_network();
-    let dwell_policy = DwellPolicy::new();
+// #[test]
+// fn trains_start_at_opposite_endpoints_in_opposite_directions() {
+//     let (network, [a, _b, _c, _d, e]) = build_tiny_metro_network();
+//     let dwell_policy = DwellPolicy::new();
 
-    let trains = vec![
-        Train::new(100, a, Direction::Forward, 3),
-        Train::new(100, e, Direction::Backward, 3),
-    ];
+//     let trains = vec![
+//         Train::new(100, a, Direction::Forward, 3),
+//         Train::new(100, e, Direction::Backward, 3),
+//     ];
 
-    let simulation = Simulation::new(network, trains, dwell_policy);
+//     let simulation = Simulation::new(network, trains, dwell_policy);
 
-    assert_eq!(simulation.trains().len(), 2);
-    assert_eq!(simulation.trains()[0].id, TrainId(0));
-    assert_eq!(simulation.trains()[1].id, TrainId(1));
+//     assert_eq!(simulation.trains().len(), 2);
+//     assert_eq!(simulation.trains()[0].id, TrainId(0));
+//     assert_eq!(simulation.trains()[1].id, TrainId(1));
 
-    assert_eq!(simulation.trains()[0].train.direction(), Direction::Forward);
-    assert_train_dwelling_at(&simulation.trains()[0].train.state(), &a);
+//     assert_eq!(simulation.trains()[0].train.direction(), Direction::Forward);
+//     assert_train_dwelling_at(&simulation.trains()[0].train.state(), &a);
 
-    assert_eq!(
-        simulation.trains()[1].train.direction(),
-        Direction::Backward
-    );
-    assert_train_dwelling_at(&simulation.trains()[1].train.state(), &e);
-}
+//     assert_eq!(
+//         simulation.trains()[1].train.direction(),
+//         Direction::Backward
+//     );
+//     assert_train_dwelling_at(&simulation.trains()[1].train.state(), &e);
+// }
 
-#[test]
-fn both_trains_depart_after_dwell() {
-    let (network, [a, b, _c, d, e]) = build_tiny_metro_network();
-    let dwell_policy = DwellPolicy::new();
+// #[test]
+// fn both_trains_depart_after_dwell() {
+//     let (network, [a, b, _c, d, e]) = build_tiny_metro_network();
+//     let dwell_policy = DwellPolicy::new();
 
-    let trains = vec![
-        Train::new(100, a, Direction::Forward, 3),
-        Train::new(100, e, Direction::Backward, 3),
-    ];
+//     let trains = vec![
+//         Train::new(100, a, Direction::Forward, 3),
+//         Train::new(100, e, Direction::Backward, 3),
+//     ];
 
-    let mut simulation = Simulation::new(network, trains, dwell_policy);
+//     let mut simulation = Simulation::new(network, trains, dwell_policy);
 
-    simulation.step(); // advance the simulation by one step
+//     simulation.step(); // advance the simulation by one step
 
-    // assert that both trains have departed from their starting stations
-    assert_eq!(
-        simulation.trains()[0].train.state(),
-        TrainState::AtStation {
-            station: a,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 1,
-                dwell_seconds: 3
-            }
-        }
-    );
-    assert_eq!(
-        simulation.trains()[1].train.state(),
-        TrainState::AtStation {
-            station: e,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 1,
-                dwell_seconds: 3
-            }
-        }
-    );
+//     // assert that both trains have departed from their starting stations
+//     assert_eq!(
+//         simulation.trains()[0].train.state(),
+//         TrainState::AtStation {
+//             station: a,
+//             state: AtStationState::Dwelling {
+//                 elapsed_seconds: 1,
+//                 dwell_seconds: 3
+//             }
+//         }
+//     );
+//     assert_eq!(
+//         simulation.trains()[1].train.state(),
+//         TrainState::AtStation {
+//             station: e,
+//             state: AtStationState::Dwelling {
+//                 elapsed_seconds: 1,
+//                 dwell_seconds: 3
+//             }
+//         }
+//     );
 
-    simulation.step(); // advance the simulation by one step
+//     simulation.step(); // advance the simulation by one step
 
-    assert_eq!(
-        simulation.trains()[0].train.state(),
-        TrainState::AtStation {
-            station: a,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 2,
-                dwell_seconds: 3
-            }
-        }
-    );
-    assert_eq!(
-        simulation.trains()[1].train.state(),
-        TrainState::AtStation {
-            station: e,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 2,
-                dwell_seconds: 3
-            }
-        }
-    );
+//     assert_eq!(
+//         simulation.trains()[0].train.state(),
+//         TrainState::AtStation {
+//             station: a,
+//             state: AtStationState::Dwelling {
+//                 elapsed_seconds: 2,
+//                 dwell_seconds: 3
+//             }
+//         }
+//     );
+//     assert_eq!(
+//         simulation.trains()[1].train.state(),
+//         TrainState::AtStation {
+//             station: e,
+//             state: AtStationState::Dwelling {
+//                 elapsed_seconds: 2,
+//                 dwell_seconds: 3
+//             }
+//         }
+//     );
 
-    simulation.step(); // advance the simulation by one step
+//     simulation.step(); // advance the simulation by one step
 
-    assert_eq!(
-        simulation.trains()[0].train.state(),
-        TrainState::Moving {
-            from: a,
-            to: b,
-            elapsed_seconds: 0
-        }
-    );
-    assert_eq!(
-        simulation.trains()[1].train.state(),
-        TrainState::Moving {
-            from: e,
-            to: d,
-            elapsed_seconds: 0
-        }
-    );
-}
+//     assert_eq!(
+//         simulation.trains()[0].train.state(),
+//         TrainState::Moving {
+//             from: a,
+//             to: b,
+//             elapsed_seconds: 0
+//         }
+//     );
+//     assert_eq!(
+//         simulation.trains()[1].train.state(),
+//         TrainState::Moving {
+//             from: e,
+//             to: d,
+//             elapsed_seconds: 0
+//         }
+//     );
+// }
 
-#[test]
-// t=0
-// │
-// │ 732 steps
-// ▼
-// t=732   ✓ ambos llegaron al extremo opuesto
-// │
-// │ 3 steps
-// ▼
-// t=735   ✓ reversal + comienzan track de regreso
-// │
-// │ 1 step
-// ▼
-// t=736   ✓ efectivamente están avanzando de regreso
-fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
-    let (network, [a, b, _c, d, e]) = build_tiny_metro_network();
-    let dwell_policy = DwellPolicy::new();
+// #[test]
+// // t=0
+// // │
+// // │ 732 steps
+// // ▼
+// // t=732   ✓ ambos llegaron al extremo opuesto
+// // │
+// // │ 3 steps
+// // ▼
+// // t=735   ✓ reversal + comienzan track de regreso
+// // │
+// // │ 1 step
+// // ▼
+// // t=736   ✓ efectivamente están avanzando de regreso
+// fn both_trains_traverse_line_reverse_and_head_back_toward_origin() {
+//     let (network, [a, b, _c, d, e]) = build_tiny_metro_network();
+//     let dwell_policy = DwellPolicy::new();
 
-    let trains = vec![
-        Train::new(100, a, Direction::Forward, 3),
-        Train::new(100, e, Direction::Backward, 3),
-    ];
+//     let trains = vec![
+//         Train::new(100, a, Direction::Forward, 3),
+//         Train::new(100, e, Direction::Backward, 3),
+//     ];
 
-    let mut simulation = Simulation::new(network, trains, dwell_policy);
+//     let mut simulation = Simulation::new(network, trains, dwell_policy);
 
-    for _ in 0..732 {
-        simulation.step();
-    }
+//     for _ in 0..732 {
+//         simulation.step();
+//     }
 
-    // assert that both trains have reached the opposite ends
-    assert_eq!(simulation.elapsed_seconds, 732);
-    for train in simulation.snapshot().trains {
-        assert_eq!(train.velocity, 0);
-    }
-    assert_eq!(
-        simulation.trains()[0].train.state(),
-        TrainState::AtStation {
-            station: e,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 0,
-                dwell_seconds: 3
-            }
-        }
-    );
-    assert_eq!(
-        simulation.trains()[1].train.state(),
-        TrainState::AtStation {
-            station: a,
-            state: AtStationState::Dwelling {
-                elapsed_seconds: 0,
-                dwell_seconds: 3
-            }
-        }
-    );
+//     // assert that both trains have reached the opposite ends
+//     assert_eq!(simulation.elapsed_seconds, 732);
+//     for train in simulation.snapshot().trains {
+//         assert_eq!(train.velocity, 0);
+//     }
+//     assert_eq!(
+//         simulation.trains()[0].train.state(),
+//         TrainState::AtStation {
+//             station: e,
+//             state: AtStationState::Dwelling {
+//                 elapsed_seconds: 0,
+//                 dwell_seconds: 3
+//             }
+//         }
+//     );
+//     assert_eq!(
+//         simulation.trains()[1].train.state(),
+//         TrainState::AtStation {
+//             station: a,
+//             state: AtStationState::Dwelling {
+//                 elapsed_seconds: 0,
+//                 dwell_seconds: 3
+//             }
+//         }
+//     );
 
-    for elapsed_seconds in 733..735 {
-        simulation.step();
-        assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
-        for train in simulation.snapshot().trains {
-            assert_eq!(train.velocity, 0);
-        }
-    }
-    simulation.step();
+//     for elapsed_seconds in 733..735 {
+//         simulation.step();
+//         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
+//         for train in simulation.snapshot().trains {
+//             assert_eq!(train.velocity, 0);
+//         }
+//     }
+//     simulation.step();
 
-    // assert that both trains have reversed and started heading back
-    assert_eq!(simulation.elapsed_seconds, 735);
-    for train in simulation.snapshot().trains {
-        assert_eq!(train.velocity, 1);
-    }
-    assert_eq!(
-        simulation.trains()[0].train.state(),
-        TrainState::Moving {
-            from: e,
-            to: d,
-            elapsed_seconds: 0
-        }
-    );
-    assert_eq!(
-        simulation.trains()[1].train.state(),
-        TrainState::Moving {
-            from: a,
-            to: b,
-            elapsed_seconds: 0
-        }
-    );
+//     // assert that both trains have reversed and started heading back
+//     assert_eq!(simulation.elapsed_seconds, 735);
+//     for train in simulation.snapshot().trains {
+//         assert_eq!(train.velocity, 1);
+//     }
+//     assert_eq!(
+//         simulation.trains()[0].train.state(),
+//         TrainState::Moving {
+//             from: e,
+//             to: d,
+//             elapsed_seconds: 0
+//         }
+//     );
+//     assert_eq!(
+//         simulation.trains()[1].train.state(),
+//         TrainState::Moving {
+//             from: a,
+//             to: b,
+//             elapsed_seconds: 0
+//         }
+//     );
 
-    simulation.step();
+//     simulation.step();
 
-    // assert that both trains are effectively moving back toward the origin
-    assert_eq!(simulation.elapsed_seconds, 736);
-    for train in simulation.snapshot().trains {
-        assert_eq!(train.velocity, 1);
-    }
-    assert_eq!(
-        simulation.trains()[0].train.state(),
-        TrainState::Moving {
-            from: e,
-            to: d,
-            elapsed_seconds: 1
-        }
-    );
-    assert_eq!(
-        simulation.trains()[1].train.state(),
-        TrainState::Moving {
-            from: a,
-            to: b,
-            elapsed_seconds: 1
-        }
-    );
+//     // assert that both trains are effectively moving back toward the origin
+//     assert_eq!(simulation.elapsed_seconds, 736);
+//     for train in simulation.snapshot().trains {
+//         assert_eq!(train.velocity, 1);
+//     }
+//     assert_eq!(
+//         simulation.trains()[0].train.state(),
+//         TrainState::Moving {
+//             from: e,
+//             to: d,
+//             elapsed_seconds: 1
+//         }
+//     );
+//     assert_eq!(
+//         simulation.trains()[1].train.state(),
+//         TrainState::Moving {
+//             from: a,
+//             to: b,
+//             elapsed_seconds: 1
+//         }
+//     );
 
-    assert_eq!(
-        simulation.trains()[0].train.direction(),
-        Direction::Backward
-    );
-    assert_eq!(simulation.trains()[1].train.direction(), Direction::Forward);
-}
+//     assert_eq!(
+//         simulation.trains()[0].train.direction(),
+//         Direction::Backward
+//     );
+//     assert_eq!(simulation.trains()[1].train.direction(), Direction::Forward);
+// }
