@@ -4,7 +4,7 @@ use crate::{
 };
 
 #[test]
-#[should_panic(expected = "station slot already occupied")]
+#[should_panic(expected = "invalid initial train registration: ResourceConflict")]
 fn simulation_rejects_duplicate_station_slot_occupancy() {
     let SimulationFixture {
         network,
@@ -29,7 +29,7 @@ fn simulation_rejects_duplicate_station_slot_occupancy() {
 }
 
 #[test]
-#[should_panic(expected = "directed track already occupied")]
+#[should_panic(expected = "invalid initial train registration: ResourceConflict")]
 fn simulation_rejects_duplicate_directed_track_occupancy() {
     let SimulationFixture {
         network,
@@ -44,7 +44,7 @@ fn simulation_rejects_duplicate_directed_track_occupancy() {
 }
 
 #[test]
-#[should_panic(expected = "station slot occupied and reserved")]
+#[should_panic(expected = "invalid initial train registration: ResourceConflict")]
 fn simulation_rejects_occupied_and_reserved_slot() {
     let SimulationFixture {
         network,
@@ -64,7 +64,7 @@ fn simulation_rejects_occupied_and_reserved_slot() {
 }
 
 #[test]
-#[should_panic(expected = "station slot occupied and reserved")]
+#[should_panic(expected = "invalid initial train registration: ResourceConflict")]
 fn simulation_rejects_reserved_and_occupied_slot() {
     let SimulationFixture {
         network,

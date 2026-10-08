@@ -206,7 +206,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "station slot already occupied")]
     fn resource_view_rejects_duplicate_station_occupants() {
         let train = Train::new(
             100,
@@ -216,20 +215,29 @@ mod tests {
         );
         let first = (1, train.clone());
         let other = (2, train);
-        resources(&[first, other]);
+        let trains = [first, other];
+        assert_eq!(
+            ResourceView::try_derive(trains.iter().map(|(owner, train)| (*owner, train))),
+            Err(ResourceConflict::StationSlot(StationSlot {
+                station: StationId(0),
+                direction: Direction::Forward,
+            })),
+        );
     }
 
     #[test]
-    #[should_panic(expected = "directed track already occupied")]
     fn resource_view_rejects_duplicate_track_occupants() {
-        resources(&[
+        let trains = [
             owned_moving_train(1, StationId(0), StationId(1), Direction::Forward),
             owned_moving_train(2, StationId(0), StationId(1), Direction::Forward),
-        ]);
+        ];
+        assert_eq!(
+            ResourceView::try_derive(trains.iter().map(|(owner, train)| (*owner, train))),
+            Err(ResourceConflict::Track(StationId(0), StationId(1))),
+        );
     }
 
     #[test]
-    #[should_panic(expected = "destination slot already reserved")]
     fn resource_view_rejects_duplicate_reservations() {
         let mut view = ResourceView::default();
         let slot = StationSlot {
@@ -245,7 +253,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "station slot occupied and reserved")]
     fn resource_view_rejects_reserving_occupied_slot() {
         let stopped = Train::new(
             100,
@@ -254,11 +261,17 @@ mod tests {
             DwellPolicy::default_dwell_seconds(),
         );
         let moving = owned_moving_train(2, StationId(0), StationId(1), Direction::Forward);
-        resources(&[(1, stopped), moving]);
+        let trains = [(1, stopped), moving];
+        assert_eq!(
+            ResourceView::try_derive(trains.iter().map(|(owner, train)| (*owner, train))),
+            Err(ResourceConflict::StationSlot(StationSlot {
+                station: StationId(1),
+                direction: Direction::Forward,
+            })),
+        );
     }
 
     #[test]
-    #[should_panic(expected = "station slot occupied and reserved")]
     fn resource_view_rejects_occupying_reserved_slot() {
         let stopped = (
             1,
@@ -270,7 +283,14 @@ mod tests {
             ),
         );
         let moving = owned_moving_train(2, StationId(0), StationId(1), Direction::Forward);
-        resources(&[moving, stopped]);
+        let trains = [moving, stopped];
+        assert_eq!(
+            ResourceView::try_derive(trains.iter().map(|(owner, train)| (*owner, train))),
+            Err(ResourceConflict::StationSlot(StationSlot {
+                station: StationId(1),
+                direction: Direction::Forward,
+            })),
+        );
     }
 
     #[test]

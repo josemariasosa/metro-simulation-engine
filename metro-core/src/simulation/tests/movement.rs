@@ -210,11 +210,11 @@ fn arrival_converts_reservation_into_destination_occupancy() {
     } = SimulationFixture::new(["A", "B"], 3);
 
     let mut simulation = Simulation::new(network, vec![], dwell_policy);
-    let train_id = simulation.add_train(Train::automatic(a, F)).unwrap();
+    let train_id = simulation.add_train(Train::manual(a, F)).unwrap();
 
     command(&mut simulation, train_id, Ok(()));
 
-    advance(&mut simulation, 2);
+    advance(&mut simulation, 3);
 
     arrived(&simulation, train_id, 1, F);
 

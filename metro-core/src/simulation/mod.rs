@@ -68,7 +68,9 @@ impl Simulation {
         };
 
         for train in trains {
-            simulation.add_train(train);
+            simulation
+                .add_train(train)
+                .expect("invalid initial train registration");
         }
 
         simulation

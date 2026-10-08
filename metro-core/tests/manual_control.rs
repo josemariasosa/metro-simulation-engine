@@ -543,7 +543,11 @@ fn command_rejections_preserve_all_trains_and_timers() {
 
     for steps in 0..=3 {
         // An unallocated identity is unknown.
-        assert_command_unchanged(&mut simulation, train_id_3, Err(CommandError::UnknownTrain));
+        assert_command_unchanged(
+            &mut simulation,
+            TrainId(train_id_3.0 + 1),
+            Err(CommandError::UnknownTrain),
+        );
         assert_command_unchanged(
             &mut simulation,
             TrainId(999),

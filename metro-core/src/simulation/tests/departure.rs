@@ -365,7 +365,7 @@ fn arrival_at_terminal_keeps_direction_until_next_departure_is_committed() {
     let train_id = simulation.add_train(Train::manual(a, F)).unwrap();
 
     command(&mut simulation, train_id, Ok(()));
-    advance(&mut simulation, 2);
+    advance(&mut simulation, 3);
 
     arrived(&simulation, train_id, 1, F);
 

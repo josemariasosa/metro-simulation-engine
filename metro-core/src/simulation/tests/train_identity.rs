@@ -1,8 +1,6 @@
-use super::*;
-
 use crate::command::{CommandError, TrainCommand};
 use crate::domain::train::{Direction, Train, TrainId};
-use crate::simulation::Simulation;
+use crate::simulation::{AddTrainError, Simulation};
 use crate::simulation::tests::SimulationFixture;
 use crate::{AtStationState, DwellPolicy, TrainState};
 
@@ -145,9 +143,10 @@ fn failed_duplicate_registration_preserves_state_and_allocator() {
     let before = simulation.snapshot();
     let duplicate = simulation.train(train_id).clone();
 
-    assert_panics(|| {
-        simulation.add_train(duplicate);
-    });
+    assert_eq!(
+        simulation.add_train(duplicate),
+        Err(AddTrainError::ResourceConflict),
+    );
 
     assert_eq!(simulation.snapshot(), before);
 
@@ -172,9 +171,10 @@ fn failed_registration_at_id_exhaustion_preserves_state_and_allocator() {
 
     let before = simulation.snapshot();
 
-    assert_panics(|| {
-        simulation.add_train(Train::new_manual(100, b, Direction::Forward, 3));
-    });
+    assert_eq!(
+        simulation.add_train(Train::new_manual(100, b, Direction::Forward, 3)),
+        Err(AddTrainError::IdExhausted),
+    );
 
     assert_eq!(simulation.snapshot(), before);
     assert_eq!(simulation.next_train_id, usize::MAX);

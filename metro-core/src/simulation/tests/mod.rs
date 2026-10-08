@@ -19,15 +19,6 @@ use crate::domain::resource::StationSlot;
 use crate::domain::train::Direction::{Backward as B, Forward as F};
 use crate::domain::train::{Direction, Train};
 
-fn assert_panics(f: impl FnOnce()) {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    assert!(
-        catch_unwind(AssertUnwindSafe(f)).is_err(),
-        "expected operation to panic"
-    );
-}
-
 /// A fresh bidirectional line for each test. Station IDs follow the supplied order.
 struct SimulationFixture<const N: usize> {
     network: Network,
