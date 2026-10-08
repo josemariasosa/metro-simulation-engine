@@ -39,7 +39,7 @@ fn scenario_topology_is_five_stations_with_expected_segment_travel_times() {
 
 fn assert_dwelling_at(simulation: &Simulation, train_id: TrainId, station: StationId) {
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station,
             state: AtStationState::Dwelling {
@@ -58,14 +58,14 @@ fn assert_moving(
     elapsed_seconds: u64,
 ) {
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from,
             to,
             elapsed_seconds,
         }
     );
-    assert_eq!(simulation.train(train_id).velocity(), 1);
+    assert_eq!(simulation.train(train_id).unwrap().velocity(), 1);
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn two_trains_traverse_the_line_reverse_and_return_toward_origin() {
     assert_eq!(simulation.elapsed_seconds, 183);
     assert_dwelling_at(&simulation, forward_train, b);
     assert_dwelling_at(&simulation, backward_train, d);
-    assert_eq!(simulation.train(forward_train).velocity(), 0);
-    assert_eq!(simulation.train(backward_train).velocity(), 0);
+    assert_eq!(simulation.train(forward_train).unwrap().velocity(), 0);
+    assert_eq!(simulation.train(backward_train).unwrap().velocity(), 0);
 
     while simulation.elapsed_seconds < 306 {
         simulation.step();
@@ -110,7 +110,7 @@ fn two_trains_traverse_the_line_reverse_and_return_toward_origin() {
     assert_eq!(simulation.elapsed_seconds, 733);
     for (train_id, station) in [(forward_train, e), (backward_train, a)] {
         assert_eq!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::AtStation {
                 station,
                 state: AtStationState::Dwelling {
@@ -127,11 +127,11 @@ fn two_trains_traverse_the_line_reverse_and_return_toward_origin() {
     assert_moving(&simulation, forward_train, e, d, 0);
     assert_moving(&simulation, backward_train, a, b, 0);
     assert_eq!(
-        simulation.train(forward_train).direction(),
+        simulation.train(forward_train).unwrap().direction(),
         Direction::Backward
     );
     assert_eq!(
-        simulation.train(backward_train).direction(),
+        simulation.train(backward_train).unwrap().direction(),
         Direction::Forward
     );
 

@@ -108,7 +108,7 @@ mod tests {
                 );
             }
         }
-        let core_train = simulation.train(player_id);
+        let core_train = simulation.train(player_id).unwrap();
         assert_eq!(core_train.capacity(), 100);
     }
 }

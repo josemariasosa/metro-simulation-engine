@@ -52,7 +52,7 @@ fn command_const(simulation: &mut Simulation, train_id: TrainId) -> Result<(), C
 
 fn moving_const(simulation: &Simulation, train_id: TrainId) -> bool {
     matches!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving { .. }
     )
 }
@@ -90,7 +90,7 @@ fn check_action(value: OperationalConstraint, station: usize, direction: Directi
         schedule(&mut simulation, value, 1, None);
         simulation.step();
 
-        let before_direction = simulation.train(train_id).direction();
+        let before_direction = simulation.train(train_id).unwrap().direction();
 
         if manual {
             assert_eq!(
@@ -108,7 +108,7 @@ fn check_action(value: OperationalConstraint, station: usize, direction: Directi
         assert_eq!(moving_const(&simulation, train_id), allowed);
 
         if !allowed {
-            let train = simulation.train(train_id);
+            let train = simulation.train(train_id).unwrap();
 
             assert_eq!(train.direction(), before_direction);
 

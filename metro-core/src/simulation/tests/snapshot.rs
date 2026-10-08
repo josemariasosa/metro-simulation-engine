@@ -16,7 +16,7 @@ fn initial_dwelling_state_maps_to_snapshot_state() {
     let mut simulation = Simulation::new(network, vec![], dwell_policy);
     let train_id = simulation.add_train(train).unwrap();
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
 
     let TrainState::AtStation {
         station,
@@ -75,7 +75,7 @@ fn dwelling_snapshot_countdown_matches_future_steps_until_departure() {
     }
 
     assert!(matches!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving { .. }
     ));
 }

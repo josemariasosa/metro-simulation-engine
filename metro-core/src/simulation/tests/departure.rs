@@ -43,7 +43,7 @@ fn admitted_departure_rederives_exact_ownership_including_reversal() {
             .unwrap();
 
         assert_eq!(simulation.elapsed_seconds, 0);
-        let train = simulation.train(train_id);
+        let train = simulation.train(train_id).unwrap();
 
         assert_eq!(train.direction(), direction);
         assert_eq!(train.velocity(), 1);
@@ -127,15 +127,15 @@ fn opposite_direction_resources_do_not_block_manual_departure() {
         );
         assert_eq!(simulation.elapsed_seconds, before.elapsed_seconds);
         assert_eq!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::Moving {
                 from: a,
                 to: b,
                 elapsed_seconds: 0,
             }
         );
-        assert_eq!(simulation.train(train_id).direction(), Direction::Forward);
-        assert_eq!(simulation.train(train_id).velocity(), 1);
+        assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
+        assert_eq!(simulation.train(train_id).unwrap().velocity(), 1);
         ResourceView::derive(simulation.trains());
     }
 }
@@ -216,7 +216,7 @@ fn automatic_departure_prefers_current_direction_then_reverse_fallback() {
             simulation.step();
         }
 
-        let train = simulation.train(train_id);
+        let train = simulation.train(train_id).unwrap();
         assert_eq!(simulation.elapsed_seconds, 3);
         assert_eq!(train.direction(), selected_direction);
         assert_eq!(train.velocity(), 1);
@@ -271,10 +271,10 @@ fn automatic_ready_train_retries_departure_on_next_step() {
     simulation.step();
 
     assert_eq!(simulation.elapsed_seconds, 1);
-    assert_eq!(simulation.train(train_id).velocity(), 1);
+    assert_eq!(simulation.train(train_id).unwrap().velocity(), 1);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: a,
             to: b,
@@ -305,7 +305,7 @@ fn automatic_departure_starts_with_velocity_one() {
         simulation.step();
     }
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
 
     assert_eq!(train.velocity(), 1);
     assert_eq!(
@@ -339,7 +339,7 @@ fn automatic_departure_reverses_at_end_of_line() {
 
     simulation.step();
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
 
     assert_eq!(train.direction(), Direction::Backward);
     assert_eq!(train.velocity(), 1);
@@ -369,14 +369,14 @@ fn arrival_at_terminal_keeps_direction_until_next_departure_is_committed() {
 
     arrived(&simulation, train_id, 1, F);
 
-    assert_eq!(simulation.train(train_id).direction(), Direction::Forward);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
 
     command(&mut simulation, train_id, Ok(()));
 
-    assert_eq!(simulation.train(train_id).direction(), Direction::Backward);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: StationId(1),
             to: StationId(0),

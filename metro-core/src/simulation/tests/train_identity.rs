@@ -47,8 +47,8 @@ fn train_identity_is_independent_of_storage_order() {
 
     simulation.trains.reverse();
 
-    assert_eq!(simulation.train(first_id).capacity(), 100);
-    assert_eq!(simulation.train(second_id).capacity(), 200);
+    assert_eq!(simulation.train(first_id).unwrap().capacity(), 100);
+    assert_eq!(simulation.train(second_id).unwrap().capacity(), 200);
 
     simulation
         .apply_command(TrainCommand::Accelerate {
@@ -57,7 +57,7 @@ fn train_identity_is_independent_of_storage_order() {
         .unwrap();
 
     assert_eq!(
-        simulation.train(second_id).state(),
+        simulation.train(second_id).unwrap().state(),
         TrainState::Moving {
             from: b,
             to: c,
@@ -66,7 +66,7 @@ fn train_identity_is_independent_of_storage_order() {
     );
 
     assert_eq!(
-        simulation.train(first_id).state(),
+        simulation.train(first_id).unwrap().state(),
         TrainState::AtStation {
             station: a,
             state: AtStationState::Dwelling {
@@ -147,7 +147,7 @@ fn failed_duplicate_registration_preserves_state_and_allocator() {
     let next_train_id_before = simulation.next_train_id;
     let constraints_before = simulation.constraints.clone();
     let next_constraint_id_before = simulation.next_constraint_id;
-    let duplicate = simulation.train(train_id).clone();
+    let duplicate = simulation.train(train_id).unwrap().clone();
 
     assert_eq!(
         simulation.add_train(duplicate),
@@ -197,4 +197,34 @@ fn failed_registration_at_id_exhaustion_preserves_state_and_allocator() {
     assert_eq!(simulation.next_train_id, usize::MAX);
     assert_eq!(simulation.constraints, constraints_before);
     assert_eq!(simulation.next_constraint_id, next_constraint_id_before);
+}
+
+#[test]
+fn train_lookup_returns_none_for_unknown_id() {
+    let SimulationFixture {
+        network,
+        dwell_policy,
+        ..
+    } = SimulationFixture::new(["A", "B", "C"], 2);
+
+    let simulation = Simulation::new(network, vec![], dwell_policy);
+
+    assert!(simulation.train(TrainId(99)).is_none());
+}
+
+#[test]
+fn zero_dwell_train_snapshots_without_panic() {
+    let SimulationFixture {
+        network,
+        stations: [a, _b, _c],
+        dwell_policy,
+    } = SimulationFixture::new(["A", "B", "C"], 2);
+
+    let mut simulation = Simulation::new(network, vec![], dwell_policy);
+    simulation
+        .add_train(Train::new_manual(0, a, Direction::Forward, 3))
+        .unwrap();
+
+    let snapshot = simulation.snapshot();
+    assert_eq!(snapshot.trains.len(), 1);
 }

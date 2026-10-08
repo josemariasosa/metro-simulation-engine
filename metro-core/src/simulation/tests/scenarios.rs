@@ -23,10 +23,10 @@ fn train_keeps_reversed_direction_after_intermediate_stop() {
     simulation.step();
     simulation.step();
 
-    assert_eq!(simulation.train(train_id).direction(), Direction::Backward);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: c,
             to: b,
@@ -39,7 +39,7 @@ fn train_keeps_reversed_direction_after_intermediate_stop() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: b,
             state: AtStationState::Dwelling {
@@ -54,10 +54,10 @@ fn train_keeps_reversed_direction_after_intermediate_stop() {
     simulation.step();
     simulation.step();
 
-    assert_eq!(simulation.train(train_id).direction(), Direction::Backward);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: b,
             to: a,

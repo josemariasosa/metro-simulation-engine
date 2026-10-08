@@ -22,7 +22,7 @@ fn new_train_starts_dwelling_and_step_advances_dwell_time() {
     let train_id = simulation.add_train(train.clone()).unwrap();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: station_a,
             state: AtStationState::Dwelling {
@@ -35,7 +35,7 @@ fn new_train_starts_dwelling_and_step_advances_dwell_time() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: station_a,
             state: AtStationState::Dwelling {
@@ -67,7 +67,7 @@ fn train_departs_when_dwell_time_is_reached() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: station_a,
             state: AtStationState::Dwelling {
@@ -80,7 +80,7 @@ fn train_departs_when_dwell_time_is_reached() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: station_a,
             to: station_b,
@@ -114,7 +114,7 @@ fn configured_dwell_duration_is_preserved_until_departure() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: a,
             state: AtStationState::Dwelling {
@@ -127,7 +127,7 @@ fn configured_dwell_duration_is_preserved_until_departure() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: a,
             to: b,

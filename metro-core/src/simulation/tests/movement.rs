@@ -22,7 +22,7 @@ fn moving_train_advances_traversal_and_preserves_velocity() {
 
     simulation.step();
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
 
     assert_eq!(train.velocity(), 1);
     assert_eq!(
@@ -57,7 +57,7 @@ fn moving_train_advances_from_zero_elapsed_seconds() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: a,
             to: b,
@@ -87,7 +87,7 @@ fn arrival_stops_train_and_starts_fresh_dwell() {
 
     simulation.step();
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
     assert_eq!(train.velocity(), 0);
     assert_eq!(
         train.state(),
@@ -125,7 +125,7 @@ fn train_remains_moving_before_track_travel_time_is_reached() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: a,
             to: b,
@@ -161,7 +161,7 @@ fn train_arrives_when_track_travel_time_is_reached() {
     simulation.step();
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: b,
             state: AtStationState::Dwelling {

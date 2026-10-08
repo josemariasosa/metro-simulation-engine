@@ -220,7 +220,7 @@ fn command(sim: &mut Simulation, train_id: TrainId, expected: Result<(), Command
 }
 
 fn moving(sim: &Simulation, train_id: TrainId, from: usize, to: usize, elapsed: u64) {
-    let train = sim.train(train_id);
+    let train = sim.train(train_id).unwrap();
     assert_eq!(
         train.state(),
         TrainState::Moving {
@@ -235,18 +235,18 @@ fn moving(sim: &Simulation, train_id: TrainId, from: usize, to: usize, elapsed: 
 
 fn ready(sim: &Simulation, train_id: TrainId, station: usize, direction: Direction) {
     assert_eq!(
-        sim.train(train_id).state(),
+        sim.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: StationId(station),
             state: AtStationState::Ready,
         }
     );
-    assert_eq!(sim.train(train_id).direction(), direction);
-    assert_eq!(sim.train(train_id).velocity(), 0);
+    assert_eq!(sim.train(train_id).unwrap().direction(), direction);
+    assert_eq!(sim.train(train_id).unwrap().velocity(), 0);
 }
 
 fn arrived(sim: &Simulation, train_id: TrainId, station: usize, direction: Direction) {
-    let t = sim.train(train_id);
+    let t = sim.train(train_id).unwrap();
     assert_eq!(
         t.state(),
         TrainState::AtStation {

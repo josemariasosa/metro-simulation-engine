@@ -45,8 +45,8 @@ fn dwelling_snapshot_state(
     dwell_seconds: u64,
 ) -> TrainSnapshotState {
     assert!(
-        elapsed_seconds < dwell_seconds,
-        "dwelling elapsed time must be less than dwell duration"
+        elapsed_seconds <= dwell_seconds,
+        "dwelling elapsed time must not exceed dwell duration"
     );
 
     TrainSnapshotState::Dwelling {
@@ -451,12 +451,11 @@ impl Simulation {
         self.constraints.retain(|record| !record.is_expired(now));
     }
 
-    pub fn train(&self, id: TrainId) -> &Train {
+    pub fn train(&self, id: TrainId) -> Option<&Train> {
         self.trains
             .iter()
             .find(|entity| entity.id() == id)
             .map(|entity| entity.train())
-            .unwrap()
     }
 
     pub fn trains(&self) -> impl Iterator<Item = (TrainId, &Train)> + '_ {

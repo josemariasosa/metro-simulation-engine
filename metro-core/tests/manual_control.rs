@@ -60,7 +60,7 @@ fn manual_train_arrival_resets_velocity_and_starts_fresh_dwell() {
         }
     );
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: StationId(1),
             state: AtStationState::Dwelling {
@@ -153,7 +153,7 @@ fn one_second_track_arrival_starts_dwell_at_zero_elapsed() {
         }
     );
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: StationId(1),
             state: AtStationState::Dwelling {
@@ -319,7 +319,7 @@ fn manual_train_becomes_ready_after_dwell_completes() {
     for elapsed_seconds in 0..3 {
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
         assert_eq!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::AtStation {
                 station: station_a,
                 state: AtStationState::Dwelling {
@@ -334,7 +334,7 @@ fn manual_train_becomes_ready_after_dwell_completes() {
 
     assert_eq!(simulation.elapsed_seconds, 3);
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: station_a,
             state: AtStationState::Ready,
@@ -360,8 +360,8 @@ fn manual_train_remains_ready_without_input() {
     simulation.step();
     simulation.step();
 
-    let ready_state = simulation.train(train_id).state();
-    let direction = simulation.train(train_id).direction();
+    let ready_state = simulation.train(train_id).unwrap().state();
+    let direction = simulation.train(train_id).unwrap().direction();
     assert_eq!(simulation.elapsed_seconds, 3);
     assert_eq!(
         ready_state,
@@ -379,8 +379,8 @@ fn manual_train_remains_ready_without_input() {
         simulation.step();
 
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
-        assert_eq!(simulation.train(train_id).state(), ready_state);
-        assert_eq!(simulation.train(train_id).direction(), direction);
+        assert_eq!(simulation.train(train_id).unwrap().state(), ready_state);
+        assert_eq!(simulation.train(train_id).unwrap().direction(), direction);
         assert_eq!(
             Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
             0
@@ -410,9 +410,9 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
     for elapsed_seconds in 4..=10 {
         simulation.step();
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
-        assert_eq!(simulation.train(train_id).direction(), Direction::Forward);
+        assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
         assert_eq!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::AtStation {
                 station: b,
                 state: AtStationState::Ready,
@@ -561,11 +561,11 @@ fn command_rejections_preserve_all_trains_and_timers() {
         }
     }
     assert!(matches!(
-        simulation.train(train_id_1).state(),
+        simulation.train(train_id_1).unwrap().state(),
         TrainState::Moving { .. }
     ));
     assert!(matches!(
-        simulation.train(train_id_2).state(),
+        simulation.train(train_id_2).unwrap().state(),
         TrainState::AtStation {
             state: AtStationState::Ready,
             ..
@@ -592,14 +592,14 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
     for elapsed_seconds in 0..=1 {
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
         assert_eq!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::Moving {
                 from: b,
                 to: a,
                 elapsed_seconds,
             }
         );
-        assert_eq!(simulation.train(train_id).direction(), Direction::Backward);
+        assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
         assert_eq!(
             Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
             1
@@ -656,7 +656,7 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
         simulation.step();
 
         assert_eq!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::AtStation {
                 station: StationId(station),
                 state: AtStationState::Dwelling {
@@ -685,7 +685,7 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
 
         // Departure selects the current direction when available,
         // otherwise the reverse fallback.
-        let train = simulation.train(train_id);
+        let train = simulation.train(train_id).unwrap();
 
         assert_eq!(train.direction(), expected_direction);
         assert_eq!(train.velocity(), 1);
@@ -764,10 +764,10 @@ fn manual_round_trip_matches_spec_002_vertical_slice() {
         simulation.step();
     }
     assert_train(&simulation, 6, Forward, 0, Ready { station: b });
-    let ready = simulation.train(train_id).state();
+    let ready = simulation.train(train_id).unwrap().state();
     simulation.step();
     assert_train(&simulation, 7, Forward, 0, Ready { station: b });
-    assert_eq!(simulation.train(train_id).state(), ready);
+    assert_eq!(simulation.train(train_id).unwrap().state(), ready);
     assert_eq!(simulation.apply_command(accelerate), Ok(()));
     assert_train(&simulation, 7, Backward, 1, moving(b, a, 0));
     simulation.step();

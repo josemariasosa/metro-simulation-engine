@@ -96,7 +96,7 @@ fn occupied_destination_blocks_during_dwell_and_after_ready_exactly() {
     }
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: a,
             state: AtStationState::Ready,
@@ -136,7 +136,7 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
 
     assert_blocked_unchanged(&mut simulation, train_id);
 
-    assert_eq!(simulation.train(train_id).direction(), Direction::Forward);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
 
     simulation
         .apply_command(TrainCommand::Accelerate {
@@ -145,7 +145,7 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
         .unwrap();
 
     assert_eq!(
-        simulation.train(blocker_id).state(),
+        simulation.train(blocker_id).unwrap().state(),
         TrainState::Moving {
             from: b,
             to: a,
@@ -155,10 +155,10 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
 
     simulation.step();
 
-    assert_eq!(simulation.train(train_id).direction(), Direction::Forward);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::AtStation {
             station: c,
             state: AtStationState::Dwelling {
@@ -173,11 +173,11 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
         .unwrap();
 
     assert_eq!(simulation.elapsed_seconds, 2);
-    assert_eq!(simulation.train(train_id).direction(), Direction::Backward);
-    assert_eq!(simulation.train(train_id).velocity(), 1);
+    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
+    assert_eq!(simulation.train(train_id).unwrap().velocity(), 1);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: c,
             to: b,

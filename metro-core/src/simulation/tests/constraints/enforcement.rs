@@ -81,7 +81,7 @@ fn automatic_ready_train_retries_only_on_later_steps() {
 
         assert_eq!(simulation.elapsed_seconds, time);
 
-        let train = simulation.train(train_id);
+        let train = simulation.train(train_id).unwrap();
 
         assert_eq!(
             train.state(),
@@ -218,7 +218,7 @@ fn future_constraints_over_claimed_resources_preserve_traversal() {
     }
 
     assert!(matches!(
-        constrained.train(constrained_train_id).state(),
+        constrained.train(constrained_train_id).unwrap().state(),
         TrainState::AtStation {
             station: StationId(1),
             ..
@@ -248,7 +248,7 @@ fn occupied_station_keeps_dwell_and_blocks_new_departure_until_reopening() {
         assert_eq!(simulation.elapsed_seconds, expected_time);
 
         assert!(matches!(
-            simulation.train(train_id).state(),
+            simulation.train(train_id).unwrap().state(),
             TrainState::AtStation {
                 station: StationId(1),
                 ..
@@ -263,7 +263,7 @@ fn occupied_station_keeps_dwell_and_blocks_new_departure_until_reopening() {
     assert_physical_invariants(&simulation);
 
     assert_eq!(
-        simulation.train(train_id).state(),
+        simulation.train(train_id).unwrap().state(),
         TrainState::Moving {
             from: StationId(1),
             to: StationId(2),
@@ -439,7 +439,7 @@ fn terminal_reversal_retries_after_operational_expiry() {
         assert_eq!(simulation.elapsed_seconds, expected_time);
 
         if expected_time < 4 {
-            let train = simulation.train(train_id);
+            let train = simulation.train(train_id).unwrap();
 
             assert_eq!(train.direction(), Direction::Forward);
 
@@ -465,7 +465,7 @@ fn terminal_reversal_retries_after_operational_expiry() {
 
     assert!(simulation.snapshot().constraints.is_empty());
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
 
     assert_eq!(train.direction(), Direction::Forward);
     assert_eq!(
@@ -480,7 +480,7 @@ fn terminal_reversal_retries_after_operational_expiry() {
 
     assert_physical_invariants(&simulation);
 
-    let train = simulation.train(train_id);
+    let train = simulation.train(train_id).unwrap();
 
     assert_eq!(train.direction(), Direction::Backward);
     assert_eq!(
