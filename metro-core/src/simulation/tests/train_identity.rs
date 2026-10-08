@@ -1,7 +1,8 @@
 use crate::command::{CommandError, TrainCommand};
+use crate::domain::resource::ResourceView;
 use crate::domain::train::{Direction, Train, TrainId};
+use crate::simulation::tests::{SimulationFixture, committed_train_state};
 use crate::simulation::{AddTrainError, Simulation};
-use crate::simulation::tests::SimulationFixture;
 use crate::{AtStationState, DwellPolicy, TrainState};
 
 #[test]
@@ -141,6 +142,11 @@ fn failed_duplicate_registration_preserves_state_and_allocator() {
         .unwrap();
 
     let before = simulation.snapshot();
+    let trains_before = committed_train_state(&simulation);
+    let resources_before = ResourceView::derive(simulation.trains());
+    let next_train_id_before = simulation.next_train_id;
+    let constraints_before = simulation.constraints.clone();
+    let next_constraint_id_before = simulation.next_constraint_id;
     let duplicate = simulation.train(train_id).clone();
 
     assert_eq!(
@@ -149,6 +155,11 @@ fn failed_duplicate_registration_preserves_state_and_allocator() {
     );
 
     assert_eq!(simulation.snapshot(), before);
+    assert_eq!(committed_train_state(&simulation), trains_before);
+    assert_eq!(ResourceView::derive(simulation.trains()), resources_before);
+    assert_eq!(simulation.next_train_id, next_train_id_before);
+    assert_eq!(simulation.constraints, constraints_before);
+    assert_eq!(simulation.next_constraint_id, next_constraint_id_before);
 
     let next_id = simulation
         .add_train(Train::new_manual(100, a, Direction::Backward, 3))
@@ -170,6 +181,10 @@ fn failed_registration_at_id_exhaustion_preserves_state_and_allocator() {
     simulation.next_train_id = usize::MAX;
 
     let before = simulation.snapshot();
+    let trains_before = committed_train_state(&simulation);
+    let resources_before = ResourceView::derive(simulation.trains());
+    let constraints_before = simulation.constraints.clone();
+    let next_constraint_id_before = simulation.next_constraint_id;
 
     assert_eq!(
         simulation.add_train(Train::new_manual(100, b, Direction::Forward, 3)),
@@ -177,5 +192,9 @@ fn failed_registration_at_id_exhaustion_preserves_state_and_allocator() {
     );
 
     assert_eq!(simulation.snapshot(), before);
+    assert_eq!(committed_train_state(&simulation), trains_before);
+    assert_eq!(ResourceView::derive(simulation.trains()), resources_before);
     assert_eq!(simulation.next_train_id, usize::MAX);
+    assert_eq!(simulation.constraints, constraints_before);
+    assert_eq!(simulation.next_constraint_id, next_constraint_id_before);
 }

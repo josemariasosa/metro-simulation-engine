@@ -1,12 +1,4 @@
 use super::*;
-// use std::collections::BTreeMap;
-
-// use crate::domain::dwell::DwellPolicy;
-// use crate::domain::network::Network;
-// use crate::domain::station::StationId;
-// use crate::domain::train::{AtStationState, Direction, Train, TrainId, TrainState};
-// use crate::simulation::Simulation;
-// use crate::snapshot::{TrainSnapshot, TrainSnapshotState};
 
 fn line<const N: usize>(names: [&str; N]) -> (Network, [StationId; N]) {
     let mut network = Network::new();
@@ -17,9 +9,9 @@ fn line<const N: usize>(names: [&str; N]) -> (Network, [StationId; N]) {
     (network, stations)
 }
 
-fn ready_snapshot(id: usize, station: StationId, direction: Direction) -> TrainSnapshot {
+fn ready_snapshot(id: TrainId, station: StationId, direction: Direction) -> TrainSnapshot {
     TrainSnapshot {
-        id: TrainId(id),
+        id,
         direction,
         velocity: 0,
         state: TrainSnapshotState::Ready { station },
@@ -27,14 +19,14 @@ fn ready_snapshot(id: usize, station: StationId, direction: Direction) -> TrainS
 }
 
 fn moving_snapshot(
-    id: usize,
+    id: TrainId,
     from: StationId,
     to: StationId,
     direction: Direction,
     elapsed_seconds: u64,
 ) -> TrainSnapshot {
     TrainSnapshot {
-        id: TrainId(id),
+        id,
         direction,
         velocity: 1,
         state: TrainSnapshotState::Moving {
@@ -46,21 +38,21 @@ fn moving_snapshot(
     }
 }
 
-fn by_id(sim: &Simulation) -> BTreeMap<usize, TrainSnapshot> {
+fn by_id(sim: &Simulation) -> HashMap<TrainId, TrainSnapshot> {
     sim.snapshot()
         .trains
         .into_iter()
-        .map(|train| (train.id.0, train))
+        .map(|train| (train.id, train))
         .collect()
 }
 
-fn assert_order(sim: &Simulation, ids: &[usize]) {
-    assert_eq!(sim.trains().map(|(id, _)| id.0).collect::<Vec<_>>(), ids);
+fn assert_order(sim: &Simulation, ids: &[TrainId]) {
+    assert_eq!(sim.trains().map(|(id, _)| id).collect::<Vec<_>>(), ids);
     assert_eq!(
         sim.snapshot()
             .trains
             .iter()
-            .map(|train| train.id.0)
+            .map(|train| train.id)
             .collect::<Vec<_>>(),
         ids
     );
@@ -71,33 +63,36 @@ fn conga_freezes_starting_ownership_in_both_storage_orders() {
     let mut traces = Vec::new();
     for reversed in [false, true] {
         let (network, [a, b, c, d]) = line(["A", "B", "C", "D"]);
-        let trains = vec![
-            Train::new(100, a, Direction::Forward, 3),
-            Train::new(100, b, Direction::Forward, 3),
-            Train::new(100, c, Direction::Forward, 3),
+        let mut sim = Simulation::new(network, vec![], DwellPolicy::new());
+        let ids = [
+            sim.add_train(Train::new(100, a, Direction::Forward, 3))
+                .unwrap(),
+            sim.add_train(Train::new(100, b, Direction::Forward, 3))
+                .unwrap(),
+            sim.add_train(Train::new(100, c, Direction::Forward, 3))
+                .unwrap(),
         ];
-        let mut sim = Simulation::new(network, trains, DwellPolicy::new());
         if reversed {
             sim.reverse_train_order_for_test();
         }
-        let order = sim.trains().map(|(id, _)| id.0).collect::<Vec<_>>();
+        let order = sim.trains().map(|(id, _)| id).collect::<Vec<_>>();
         let mut trace = Vec::new();
         let expected = [
             vec![
-                ready_snapshot(0, a, Direction::Forward),
-                ready_snapshot(1, b, Direction::Forward),
-                moving_snapshot(2, c, d, Direction::Forward, 0),
+                ready_snapshot(ids[0], a, Direction::Forward),
+                ready_snapshot(ids[1], b, Direction::Forward),
+                moving_snapshot(ids[2], c, d, Direction::Forward, 0),
             ],
             vec![
-                ready_snapshot(0, a, Direction::Forward),
-                moving_snapshot(1, b, c, Direction::Forward, 0),
-                moving_snapshot(2, c, d, Direction::Forward, 1),
+                ready_snapshot(ids[0], a, Direction::Forward),
+                moving_snapshot(ids[1], b, c, Direction::Forward, 0),
+                moving_snapshot(ids[2], c, d, Direction::Forward, 1),
             ],
             vec![
-                moving_snapshot(0, a, b, Direction::Forward, 0),
-                moving_snapshot(1, b, c, Direction::Forward, 1),
+                moving_snapshot(ids[0], a, b, Direction::Forward, 0),
+                moving_snapshot(ids[1], b, c, Direction::Forward, 1),
                 TrainSnapshot {
-                    id: TrainId(2),
+                    id: ids[2],
                     direction: Direction::Forward,
                     velocity: 0,
                     state: TrainSnapshotState::Dwelling {
@@ -119,13 +114,13 @@ fn conga_freezes_starting_ownership_in_both_storage_orders() {
                 let wanted = expected[(time - 3) as usize]
                     .iter()
                     .cloned()
-                    .map(|train| (train.id.0, train))
-                    .collect::<BTreeMap<_, _>>();
+                    .map(|train| (train.id, train))
+                    .collect::<HashMap<_, _>>();
                 assert_eq!(actual, wanted, "conga t={time}, reversed={reversed}");
                 trace.push(actual);
             }
         }
-        let t3 = sim.trains().find(|(id, _)| *id == TrainId(2)).unwrap();
+        let t3 = sim.trains().find(|(id, _)| *id == ids[2]).unwrap();
         assert_eq!(
             t3.1.state(),
             TrainState::AtStation {
@@ -146,15 +141,18 @@ fn terminal_contention_uses_numeric_id_in_both_storage_orders() {
     let mut outcomes = Vec::new();
     for reversed in [false, true] {
         let (network, [a, b]) = line(["A", "B"]);
-        let trains = vec![
-            Train::new(100, b, Direction::Forward, 3),
-            Train::new(100, b, Direction::Backward, 3),
-        ];
-        let mut sim = Simulation::new(network, trains, DwellPolicy::new());
+        let mut sim = Simulation::new(network, vec![], DwellPolicy::new());
+        let first_id = sim
+            .add_train(Train::new(100, b, Direction::Forward, 3))
+            .unwrap();
+        let second_id = sim
+            .add_train(Train::new(100, b, Direction::Backward, 3))
+            .unwrap();
+        assert!(first_id.0 < second_id.0);
         if reversed {
             sim.reverse_train_order_for_test();
         }
-        let order = sim.trains().map(|(id, _)| id.0).collect::<Vec<_>>();
+        let order = sim.trains().map(|(id, _)| id).collect::<Vec<_>>();
         for _ in 0..3 {
             sim.step();
             assert_order(&sim, &order);
@@ -162,11 +160,26 @@ fn terminal_contention_uses_numeric_id_in_both_storage_orders() {
         assert_eq!(sim.elapsed_seconds, 3);
         let outcome = by_id(&sim);
         assert_eq!(
-            outcome[&0],
-            moving_snapshot(0, b, a, Direction::Backward, 0)
+            outcome[&first_id],
+            moving_snapshot(first_id, b, a, Direction::Backward, 0)
         );
-        assert_eq!(outcome[&1], ready_snapshot(1, b, Direction::Backward));
+        assert_eq!(
+            outcome[&second_id],
+            ready_snapshot(second_id, b, Direction::Backward)
+        );
         outcomes.push(outcome);
+
+        advance(&mut sim, 2);
+        arrived(&sim, first_id, 0, Direction::Backward);
+
+        advance(&mut sim, 3);
+        moving(&sim, first_id, 0, 1, 0);
+        assert_eq!(sim.train(first_id).direction(), Direction::Forward);
+        ready(&sim, second_id, 1, Direction::Backward);
+
+        sim.step();
+        moving(&sim, second_id, 1, 0, 0);
+        assert_eq!(sim.train(second_id).direction(), Direction::Backward);
     }
     assert_eq!(outcomes[0], outcomes[1]);
 }

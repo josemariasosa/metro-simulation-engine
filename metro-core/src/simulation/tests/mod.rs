@@ -10,7 +10,6 @@ mod snapshot;
 mod time;
 mod train_identity;
 
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use super::*;
@@ -67,12 +66,18 @@ fn assert_constraint_failure_atomic(
     register: impl FnOnce(&mut Simulation) -> Result<ConstraintId, ConstraintError>,
 ) {
     let snapshot = simulation.snapshot();
+    let trains = committed_train_state(simulation);
+    let resources = ResourceView::derive(simulation.trains());
+    let next_train_id = simulation.next_train_id;
     let records = simulation.constraints.clone();
     let next_id = simulation.next_constraint_id;
 
     assert_eq!(register(simulation), Err(expected));
 
     assert_eq!(simulation.snapshot(), snapshot);
+    assert_eq!(committed_train_state(simulation), trains);
+    assert_eq!(ResourceView::derive(simulation.trains()), resources);
+    assert_eq!(simulation.next_train_id, next_train_id);
     assert_eq!(simulation.constraints, records);
     assert_eq!(simulation.next_constraint_id, next_id);
 }
@@ -150,19 +155,6 @@ fn assert_physical_invariants(sim: &crate::simulation::Simulation) {
     assert_claims(&sim.trains, &occupants, &reservations, &tracks);
 }
 
-fn line(n: usize, trains: Vec<Train>) -> Simulation {
-    let mut network = Network::new();
-    for i in 0..n {
-        network.add_station(&i.to_string());
-    }
-    for i in 1..n {
-        network.connect_bidirectional(StationId(i - 1), StationId(i), 2);
-    }
-    let sim = Simulation::new(network, trains, DwellPolicy::new());
-    assert_physical_invariants(&sim);
-    sim
-}
-
 fn step(sim: &mut Simulation) {
     let time = sim.elapsed_seconds;
     sim.step();
@@ -176,29 +168,34 @@ fn advance(sim: &mut Simulation, seconds: usize) {
     }
 }
 
-// Compare every committed train field, including fields absent from snapshots.
-fn assert_world(sim: &Simulation, time: u64, trains: &[TrainEntity]) {
-    assert_eq!(sim.elapsed_seconds, time);
-    assert_eq!(sim.trains().count(), trains.len());
-    for (actual_entity, expected) in sim.trains().zip(trains) {
-        let actual = actual_entity.1;
-        assert_eq!(actual_entity.0, expected.id());
-        let expected = expected.train();
-        assert_eq!(actual.capacity(), expected.capacity());
-        assert_eq!(actual.is_manual_control(), expected.is_manual_control());
-        assert_eq!(
-            actual.is_automatic_control(),
-            expected.is_automatic_control()
-        );
-        assert_eq!(actual.direction(), expected.direction());
-        assert_eq!(actual.velocity(), expected.velocity());
-        assert_eq!(actual.state(), expected.state());
-    }
+pub(super) fn committed_train_state(
+    sim: &Simulation,
+) -> HashMap<TrainId, (usize, bool, bool, Direction, u8, TrainState)> {
+    sim.trains()
+        .map(|(id, train)| {
+            (
+                id,
+                (
+                    train.capacity(),
+                    train.is_manual_control(),
+                    train.is_automatic_control(),
+                    train.direction(),
+                    train.velocity(),
+                    train.state(),
+                ),
+            )
+        })
+        .collect()
 }
 
 fn command(sim: &mut Simulation, train_id: TrainId, expected: Result<(), CommandError>) {
     let time = sim.elapsed_seconds;
     let before = sim.snapshot();
+    let trains_before = committed_train_state(sim);
+    let resources_before = ResourceView::derive(sim.trains());
+    let next_train_id_before = sim.next_train_id;
+    let constraints_before = sim.constraints.clone();
+    let next_constraint_id_before = sim.next_constraint_id;
 
     let already_moving = sim
         .trains()
@@ -214,6 +211,11 @@ fn command(sim: &mut Simulation, train_id: TrainId, expected: Result<(), Command
 
     if expected.is_err() || already_moving {
         assert_eq!(sim.snapshot(), before);
+        assert_eq!(committed_train_state(sim), trains_before);
+        assert_eq!(ResourceView::derive(sim.trains()), resources_before);
+        assert_eq!(sim.next_train_id, next_train_id_before);
+        assert_eq!(sim.constraints, constraints_before);
+        assert_eq!(sim.next_constraint_id, next_constraint_id_before);
     }
 }
 

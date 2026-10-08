@@ -39,6 +39,9 @@ fn unknown_removal_preserves_registry_and_state() {
         .create_constraint_at(closed(a), 5, None, ConstraintOrigin::Planned)
         .unwrap();
     let snapshot = simulation.snapshot();
+    let trains = committed_train_state(&simulation);
+    let resources = ResourceView::derive(simulation.trains());
+    let next_train_id = simulation.next_train_id;
     let records = simulation.constraints.clone();
 
     assert_eq!(
@@ -47,6 +50,9 @@ fn unknown_removal_preserves_registry_and_state() {
     );
 
     assert_eq!(simulation.snapshot(), snapshot);
+    assert_eq!(committed_train_state(&simulation), trains);
+    assert_eq!(ResourceView::derive(simulation.trains()), resources);
+    assert_eq!(simulation.next_train_id, next_train_id);
     assert_eq!(simulation.constraints, records);
     assert_eq!(simulation.next_constraint_id, 1);
 }

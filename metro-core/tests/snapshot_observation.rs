@@ -8,13 +8,16 @@ use metro_core::{
     TrainId,
 };
 
-fn test_simulation(travel_seconds: u64) -> Simulation {
+fn test_simulation(travel_seconds: u64) -> (Simulation, TrainId) {
     let mut network = Network::new();
     let a = network.add_station("A");
     let b = network.add_station("B");
     network.connect_bidirectional(a, b, travel_seconds);
-    let train = Train::new(100, a, Direction::Forward, 3);
-    Simulation::new(network, vec![train], DwellPolicy::new())
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let train_id = simulation
+        .add_train(Train::new(100, a, Direction::Forward, 3))
+        .unwrap();
+    (simulation, train_id)
 }
 
 fn no_train_simulation() -> (Simulation, StationId, StationId) {
@@ -30,6 +33,7 @@ fn track_constraint(from: StationId, to: StationId) -> OperationalConstraint {
 }
 
 fn expected_snapshot(
+    train_id: TrainId,
     elapsed_seconds: u64,
     velocity: u8,
     state: TrainSnapshotState,
@@ -37,7 +41,7 @@ fn expected_snapshot(
     SimulationSnapshot {
         elapsed_seconds,
         trains: vec![TrainSnapshot {
-            id: TrainId(0),
+            id: train_id,
             direction: Direction::Forward,
             state,
             velocity,
@@ -48,7 +52,7 @@ fn expected_snapshot(
 
 #[test]
 fn repeated_snapshots_without_step_are_equal() {
-    let simulation = test_simulation(6);
+    let (simulation, _) = test_simulation(6);
 
     let first = simulation.snapshot();
     let second = simulation.snapshot();
@@ -58,7 +62,7 @@ fn repeated_snapshots_without_step_are_equal() {
 
 #[test]
 fn retained_snapshot_does_not_change_after_simulation_advances() {
-    let mut simulation = test_simulation(6);
+    let (mut simulation, _) = test_simulation(6);
 
     let old_snapshot = simulation.snapshot();
     let expected = old_snapshot.clone();
@@ -73,7 +77,7 @@ fn retained_snapshot_does_not_change_after_simulation_advances() {
 
 #[test]
 fn modifying_snapshot_does_not_modify_simulation() {
-    let simulation = test_simulation(6);
+    let (simulation, _) = test_simulation(6);
 
     let original = simulation.snapshot();
     let mut local_copy = simulation.snapshot();
@@ -87,8 +91,8 @@ fn modifying_snapshot_does_not_modify_simulation() {
 
 #[test]
 fn observation_frequency_does_not_affect_simulation_result() {
-    let mut frequently_observed = test_simulation(6);
-    let mut sparsely_observed = test_simulation(6);
+    let (mut frequently_observed, _) = test_simulation(6);
+    let (mut sparsely_observed, _) = test_simulation(6);
 
     for _ in 0..12 {
         frequently_observed.snapshot();
@@ -118,11 +122,12 @@ fn snapshot_reports_empty_simulation() {
 
 #[test]
 fn snapshot_reports_initial_dwelling_state() {
-    let simulation = test_simulation(6);
+    let (simulation, train_id) = test_simulation(6);
 
     assert_eq!(
         simulation.snapshot(),
         expected_snapshot(
+            train_id,
             0,
             0,
             TrainSnapshotState::Dwelling {
@@ -140,7 +145,8 @@ fn snapshot_represents_ready_manual_train() {
     let station_b = network.add_station("B");
     network.connect_bidirectional(station_a, station_b, 6);
     let train = Train::new_manual(100, station_a, Direction::Forward, 3);
-    let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let train_id = simulation.add_train(train).unwrap();
 
     for _ in 0..3 {
         simulation.step();
@@ -149,15 +155,18 @@ fn snapshot_represents_ready_manual_train() {
     let snapshot = simulation.snapshot();
 
     assert_eq!(
-        snapshot.trains[0].state,
+        Simulation::snapshot_train_by_id(&snapshot, train_id).state,
         TrainSnapshotState::Ready { station: station_a }
     );
-    assert_eq!(snapshot.trains[0].velocity, 0);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&snapshot, train_id).velocity,
+        0
+    );
 }
 
 #[test]
 fn snapshot_reports_departure_with_zero_elapsed_time() {
-    let mut simulation = test_simulation(6);
+    let (mut simulation, train_id) = test_simulation(6);
     for _ in 0..3 {
         simulation.step();
     }
@@ -165,6 +174,7 @@ fn snapshot_reports_departure_with_zero_elapsed_time() {
     assert_eq!(
         simulation.snapshot(),
         expected_snapshot(
+            train_id,
             3,
             1,
             TrainSnapshotState::Moving {
@@ -179,7 +189,7 @@ fn snapshot_reports_departure_with_zero_elapsed_time() {
 
 #[test]
 fn snapshot_reports_intermediate_movement() {
-    let mut simulation = test_simulation(6);
+    let (mut simulation, train_id) = test_simulation(6);
     for _ in 0..5 {
         simulation.step();
     }
@@ -187,6 +197,7 @@ fn snapshot_reports_intermediate_movement() {
     assert_eq!(
         simulation.snapshot(),
         expected_snapshot(
+            train_id,
             5,
             1,
             TrainSnapshotState::Moving {
@@ -201,7 +212,7 @@ fn snapshot_reports_intermediate_movement() {
 
 #[test]
 fn snapshot_reports_arrival_as_dwelling() {
-    let mut simulation = test_simulation(6);
+    let (mut simulation, train_id) = test_simulation(6);
     for _ in 0..9 {
         simulation.step();
     }
@@ -209,6 +220,7 @@ fn snapshot_reports_arrival_as_dwelling() {
     assert_eq!(
         simulation.snapshot(),
         expected_snapshot(
+            train_id,
             9,
             0,
             TrainSnapshotState::Dwelling {
@@ -221,7 +233,7 @@ fn snapshot_reports_arrival_as_dwelling() {
 
 #[test]
 fn snapshot_reports_departure_and_arrival_on_one_second_track() {
-    let mut simulation = test_simulation(1);
+    let (mut simulation, train_id) = test_simulation(1);
     for _ in 0..3 {
         simulation.step();
     }
@@ -229,6 +241,7 @@ fn snapshot_reports_departure_and_arrival_on_one_second_track() {
     assert_eq!(
         simulation.snapshot(),
         expected_snapshot(
+            train_id,
             3,
             1,
             TrainSnapshotState::Moving {
@@ -245,6 +258,7 @@ fn snapshot_reports_departure_and_arrival_on_one_second_track() {
     assert_eq!(
         simulation.snapshot(),
         expected_snapshot(
+            train_id,
             4,
             0,
             TrainSnapshotState::Dwelling {
@@ -262,11 +276,13 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
     let b = network.add_station("B");
     network.add_track(a, b, 6);
     network.add_track(b, a, 4);
-    let trains = vec![
-        Train::new(100, b, Direction::Backward, 3),
-        Train::new(100, a, Direction::Forward, 3),
-    ];
-    let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let backward_id = simulation
+        .add_train(Train::new(100, b, Direction::Backward, 3))
+        .unwrap();
+    let forward_id = simulation
+        .add_train(Train::new(100, a, Direction::Forward, 3))
+        .unwrap();
     for _ in 0..3 {
         simulation.step();
     }
@@ -277,7 +293,7 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
             elapsed_seconds: 3,
             trains: vec![
                 TrainSnapshot {
-                    id: TrainId(0),
+                    id: backward_id,
                     direction: Direction::Backward,
                     velocity: 1,
                     state: TrainSnapshotState::Moving {
@@ -288,7 +304,7 @@ fn snapshot_preserves_train_order_and_uses_each_active_track() {
                     },
                 },
                 TrainSnapshot {
-                    id: TrainId(1),
+                    id: forward_id,
                     direction: Direction::Forward,
                     velocity: 1,
                     state: TrainSnapshotState::Moving {
@@ -479,7 +495,7 @@ fn duplicate_values_remain_distinct_and_indefinite_records_persist_until_removed
 
 #[test]
 fn retained_and_mutated_snapshot_values_do_not_change_simulation() {
-    let mut simulation = test_simulation(6);
+    let (mut simulation, _) = test_simulation(6);
     let (a, b) = (StationId(0), StationId(1));
     let retained_id = simulation
         .create_constraint_at(track_constraint(a, b), 8, None, ConstraintOrigin::Planned)
@@ -504,16 +520,25 @@ fn retained_and_mutated_snapshot_values_do_not_change_simulation() {
 
 #[test]
 fn snapshot_copies_train_velocity() {
-    let mut simulation = test_simulation(6);
+    let (mut simulation, train_id) = test_simulation(6);
 
     let initial_snapshot = simulation.snapshot();
-    assert_eq!(initial_snapshot.trains[0].velocity, 0);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&initial_snapshot, train_id).velocity,
+        0
+    );
 
     for _ in 0..3 {
         simulation.step();
     }
 
     let departure_snapshot = simulation.snapshot();
-    assert_eq!(departure_snapshot.trains[0].velocity, 1);
-    assert_eq!(initial_snapshot.trains[0].velocity, 0);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&departure_snapshot, train_id).velocity,
+        1
+    );
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&initial_snapshot, train_id).velocity,
+        0
+    );
 }

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use metro_core::{
     ConstraintError, ConstraintId, ConstraintOrigin, Direction, DwellPolicy, Network,
-    OperationalConstraint, Train, TrainId,
+    OperationalConstraint, Train,
     command::{CommandError, TrainCommand},
     simulation::Simulation,
     snapshot::{SimulationSnapshot, TrainSnapshotState},
@@ -44,15 +44,18 @@ fn run_reopening_conga(remove_at_five: bool) -> Vec<SimulationSnapshot> {
     network.connect_bidirectional(b, c, 3);
     network.connect_bidirectional(c, d, 3);
 
-    let mut simulation = Simulation::new(
-        network,
-        vec![
-            Train::new(100, a, Direction::Forward, 3),
-            Train::new(100, b, Direction::Forward, 3),
-            Train::new(100, c, Direction::Forward, 3),
-        ],
-        DwellPolicy::new(),
-    );
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let ids = [
+        simulation
+            .add_train(Train::new(100, a, Direction::Forward, 3))
+            .unwrap(),
+        simulation
+            .add_train(Train::new(100, b, Direction::Forward, 3))
+            .unwrap(),
+        simulation
+            .add_train(Train::new(100, c, Direction::Forward, 3))
+            .unwrap(),
+    ];
     let constraint = simulation
         .create_constraint_at(
             OperationalConstraint::TrackUnavailable { from: c, to: d },
@@ -108,13 +111,13 @@ fn run_reopening_conga(remove_at_five: bool) -> Vec<SimulationSnapshot> {
             .all(|train| matches!(train.state, TrainSnapshotState::Ready { .. }))
     );
 
-    for (expected_time, newly_departed) in [(6, 2), (7, 1), (8, 0)] {
+    for (expected_time, newly_departed) in [(6, ids[2]), (7, ids[1]), (8, ids[0])] {
         simulation.step();
         let snapshot = simulation.snapshot();
         assert_eq!(snapshot.elapsed_seconds, expected_time);
         assert_snapshot_claims(&snapshot, 4, 3);
         for train in &snapshot.trains {
-            if train.id.0 == newly_departed {
+            if train.id == newly_departed {
                 assert!(matches!(
                     train.state,
                     TrainSnapshotState::Moving {
@@ -122,7 +125,9 @@ fn run_reopening_conga(remove_at_five: bool) -> Vec<SimulationSnapshot> {
                         ..
                     }
                 ));
-            } else if train.id.0 < newly_departed {
+            } else if ids.iter().position(|id| *id == train.id).unwrap()
+                < ids.iter().position(|id| *id == newly_departed).unwrap()
+            {
                 assert!(matches!(train.state, TrainSnapshotState::Ready { .. }));
             }
         }
@@ -160,15 +165,12 @@ fn conga_train_trace(injected_at_time_one: bool) -> Vec<Vec<metro_core::snapshot
     network.connect_bidirectional(a, b, 3);
     network.connect_bidirectional(b, c, 3);
     network.connect_bidirectional(c, d, 3);
-    let mut simulation = Simulation::new(
-        network,
-        vec![
-            Train::new(100, a, Direction::Forward, 3),
-            Train::new(100, b, Direction::Forward, 3),
-            Train::new(100, c, Direction::Forward, 3),
-        ],
-        DwellPolicy::new(),
-    );
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    for station in [a, b, c] {
+        simulation
+            .add_train(Train::new(100, station, Direction::Forward, 3))
+            .unwrap();
+    }
     if !injected_at_time_one {
         simulation
             .create_constraint_at(
@@ -228,15 +230,16 @@ fn run_public_trace(observe_frequently: bool, terminal_origin: ConstraintOrigin)
     network.connect_bidirectional(a, b, 3);
     network.connect_bidirectional(b, c, 3);
     network.connect_bidirectional(c, d, 3);
-    let mut simulation = Simulation::new(
-        network,
-        vec![
-            Train::new(100, d, Direction::Forward, 3),
-            Train::new(100, d, Direction::Backward, 3),
-            Train::new_manual(100, a, Direction::Forward, 10),
-        ],
-        DwellPolicy::new(),
-    );
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let forward_terminal = simulation
+        .add_train(Train::new(100, d, Direction::Forward, 3))
+        .unwrap();
+    let backward_terminal = simulation
+        .add_train(Train::new(100, d, Direction::Backward, 3))
+        .unwrap();
+    let manual_train = simulation
+        .add_train(Train::new_manual(100, a, Direction::Forward, 10))
+        .unwrap();
 
     let mut ids = Vec::new();
     let mut command_results = Vec::new();
@@ -275,7 +278,7 @@ fn run_public_trace(observe_frequently: bool, terminal_origin: ConstraintOrigin)
     snapshots.push(simulation.snapshot());
 
     command_results.push(simulation.apply_command(TrainCommand::Accelerate {
-        train_id: TrainId(2),
+        train_id: manual_train,
     }));
     if observe_frequently {
         let _ = simulation.snapshot();
@@ -289,7 +292,7 @@ fn run_public_trace(observe_frequently: bool, terminal_origin: ConstraintOrigin)
         }
     }
     command_results.push(simulation.apply_command(TrainCommand::Accelerate {
-        train_id: TrainId(2),
+        train_id: manual_train,
     }));
     simulation.remove_constraint(canceled).unwrap();
     snapshots.push(simulation.snapshot());
@@ -335,7 +338,7 @@ fn run_public_trace(observe_frequently: bool, terminal_origin: ConstraintOrigin)
     assert!(snapshots.iter().any(|snapshot| {
         snapshot.elapsed_seconds == 6
             && matches!(
-                snapshot.trains[0].state,
+                Simulation::snapshot_train_by_id(snapshot, forward_terminal).state,
                 TrainSnapshotState::Moving {
                     from,
                     to,
@@ -345,12 +348,15 @@ fn run_public_trace(observe_frequently: bool, terminal_origin: ConstraintOrigin)
             )
     }));
     assert!(matches!(
-        final_snapshot.trains[1].state,
+        Simulation::snapshot_train_by_id(&final_snapshot, backward_terminal).state,
         TrainSnapshotState::Ready { station } if station == d
     ));
-    assert_eq!(final_snapshot.trains[0].direction, Direction::Backward);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&final_snapshot, forward_terminal).direction,
+        Direction::Backward
+    );
     assert!(matches!(
-        final_snapshot.trains[2].state,
+        Simulation::snapshot_train_by_id(&final_snapshot, manual_train).state,
         TrainSnapshotState::Dwelling { station, .. } | TrainSnapshotState::Ready { station }
             if station == b
     ));
@@ -400,21 +406,20 @@ fn replay_and_observation_frequency_do_not_change_constraint_traces() {
 
 #[test]
 fn manual_contention_after_reopening_follows_serial_command_order() {
-    for first_train in [TrainId(0), TrainId(1)] {
+    for first_is_forward in [true, false] {
         let mut network = Network::new();
         let a = network.add_station("A");
         let b = network.add_station("B");
         let c = network.add_station("C");
         network.connect_bidirectional(a, b, 3);
         network.connect_bidirectional(b, c, 3);
-        let mut simulation = Simulation::new(
-            network,
-            vec![
-                Train::new_manual(100, c, Direction::Forward, 3),
-                Train::new_manual(100, c, Direction::Backward, 3),
-            ],
-            DwellPolicy::new(),
-        );
+        let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+        let forward_train = simulation
+            .add_train(Train::new_manual(100, c, Direction::Forward, 3))
+            .unwrap();
+        let backward_train = simulation
+            .add_train(Train::new_manual(100, c, Direction::Backward, 3))
+            .unwrap();
         let constraint = simulation
             .create_constraint_at(
                 OperationalConstraint::StationUnavailable { station: c },
@@ -425,10 +430,15 @@ fn manual_contention_after_reopening_follows_serial_command_order() {
             .unwrap();
         simulation.step();
         simulation.remove_constraint(constraint).unwrap();
-        let second_train = if first_train == TrainId(0) {
-            TrainId(1)
+        let first_train = if first_is_forward {
+            forward_train
         } else {
-            TrainId(0)
+            backward_train
+        };
+        let second_train = if first_is_forward {
+            backward_train
+        } else {
+            forward_train
         };
         assert_eq!(
             simulation.apply_command(TrainCommand::Accelerate {
@@ -445,16 +455,16 @@ fn manual_contention_after_reopening_follows_serial_command_order() {
         );
         let snapshot = simulation.snapshot();
         assert!(matches!(
-            snapshot.trains[first_train.0].state,
+            Simulation::snapshot_train_by_id(&snapshot, first_train).state,
             TrainSnapshotState::Moving { from, to, elapsed_seconds: 0, .. }
                 if from == c && to == b
         ));
         assert_eq!(
-            snapshot.trains[second_train.0].state,
-            before_second_command.trains[second_train.0].state
+            Simulation::snapshot_train_by_id(&snapshot, second_train).state,
+            Simulation::snapshot_train_by_id(&before_second_command, second_train).state
         );
         assert!(matches!(
-            snapshot.trains[second_train.0].state,
+            Simulation::snapshot_train_by_id(&snapshot, second_train).state,
             TrainSnapshotState::Dwelling { station, .. } | TrainSnapshotState::Ready { station }
                 if station == c
         ));
@@ -469,14 +479,13 @@ fn removal_does_not_override_an_existing_physical_station_claim() {
     let c = network.add_station("C");
     network.connect_bidirectional(a, b, 3);
     network.connect_bidirectional(b, c, 3);
-    let mut simulation = Simulation::new(
-        network,
-        vec![
-            Train::new(100, a, Direction::Forward, 2),
-            Train::new(100, b, Direction::Forward, 2),
-        ],
-        DwellPolicy::new(),
-    );
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let first_train = simulation
+        .add_train(Train::new(100, a, Direction::Forward, 2))
+        .unwrap();
+    let second_train = simulation
+        .add_train(Train::new(100, b, Direction::Forward, 2))
+        .unwrap();
     let constraint = simulation
         .create_constraint_at(
             OperationalConstraint::TrackUnavailable { from: a, to: b },
@@ -492,18 +501,18 @@ fn removal_does_not_override_an_existing_physical_station_claim() {
     let after_reopening = simulation.snapshot();
     assert!(after_reopening.constraints.is_empty());
     assert!(matches!(
-        after_reopening.trains[0].state,
+        Simulation::snapshot_train_by_id(&after_reopening, first_train).state,
         TrainSnapshotState::Ready { station } if station == a
     ));
     assert!(matches!(
-        after_reopening.trains[1].state,
+        Simulation::snapshot_train_by_id(&after_reopening, second_train).state,
         TrainSnapshotState::Moving { from, to, elapsed_seconds: 0, .. }
             if from == b && to == c
     ));
 
     simulation.step();
     assert!(matches!(
-        simulation.snapshot().trains[0].state,
+        Simulation::snapshot_train_by_id(&simulation.snapshot(), first_train).state,
         TrainSnapshotState::Moving { from, to, elapsed_seconds: 0, .. }
             if from == a && to == b
     ));
@@ -522,11 +531,10 @@ fn public_scheduling_apis_have_operational_effect() {
             } else {
                 Train::new
             };
-            let mut sim = Simulation::new(
-                network,
-                vec![constructor(100, a, Direction::Forward, 2)],
-                DwellPolicy::new(),
-            );
+            let mut sim = Simulation::new(network, vec![], DwellPolicy::new());
+            let train_id = sim
+                .add_train(constructor(100, a, Direction::Forward, 2))
+                .unwrap();
             let value = OperationalConstraint::TrackUnavailable { from: a, to: b };
             let id: ConstraintId = if relative {
                 sim.create_constraint_in(value, 1, None, ConstraintOrigin::Injected)
@@ -535,9 +543,7 @@ fn public_scheduling_apis_have_operational_effect() {
             }
             .unwrap();
             sim.step();
-            let accelerate = TrainCommand::Accelerate {
-                train_id: TrainId(0),
-            };
+            let accelerate = TrainCommand::Accelerate { train_id };
             if manual {
                 let before = sim.snapshot();
                 assert_eq!(sim.apply_command(accelerate), Err(CommandError::Blocked));
@@ -545,7 +551,7 @@ fn public_scheduling_apis_have_operational_effect() {
             }
             sim.step();
             assert_eq!(
-                sim.snapshot().trains[0].state,
+                Simulation::snapshot_train_by_id(&sim.snapshot(), train_id).state,
                 TrainSnapshotState::Ready { station: a }
             );
             sim.remove_constraint(id).unwrap();
@@ -554,19 +560,17 @@ fn public_scheduling_apis_have_operational_effect() {
                 Err(ConstraintError::UnknownConstraint)
             );
             assert_eq!(
-                sim.snapshot().trains[0].state,
+                Simulation::snapshot_train_by_id(&sim.snapshot(), train_id).state,
                 TrainSnapshotState::Ready { station: a }
             );
             if manual {
-                sim.apply_command(TrainCommand::Accelerate {
-                    train_id: TrainId(0),
-                })
-                .unwrap();
+                sim.apply_command(TrainCommand::Accelerate { train_id })
+                    .unwrap();
             } else {
                 sim.step();
             }
             assert_eq!(
-                sim.snapshot().trains[0].state,
+                Simulation::snapshot_train_by_id(&sim.snapshot(), train_id).state,
                 TrainSnapshotState::Moving {
                     from: a,
                     to: b,
@@ -590,11 +594,10 @@ fn public_expiry_trace_requires_a_later_departure_attempt() {
         } else {
             Train::new
         };
-        let mut sim = Simulation::new(
-            network,
-            vec![constructor(100, a, Direction::Forward, 12)],
-            DwellPolicy::new(),
-        );
+        let mut sim = Simulation::new(network, vec![], DwellPolicy::new());
+        let train_id = sim
+            .add_train(constructor(100, a, Direction::Forward, 12))
+            .unwrap();
         for _ in 0..10 {
             sim.step();
         }
@@ -610,15 +613,13 @@ fn public_expiry_trace_requires_a_later_departure_attempt() {
             assert_eq!(sim.elapsed_seconds, time);
             if manual {
                 assert_eq!(
-                    sim.apply_command(TrainCommand::Accelerate {
-                        train_id: TrainId(0)
-                    }),
+                    sim.apply_command(TrainCommand::Accelerate { train_id }),
                     Err(CommandError::Blocked)
                 );
             }
             sim.step();
             assert_eq!(
-                sim.snapshot().trains[0].state,
+                Simulation::snapshot_train_by_id(&sim.snapshot(), train_id).state,
                 TrainSnapshotState::Ready { station: a }
             );
         }
@@ -626,18 +627,16 @@ fn public_expiry_trace_requires_a_later_departure_attempt() {
         if manual {
             sim.step();
             assert_eq!(
-                sim.snapshot().trains[0].state,
+                Simulation::snapshot_train_by_id(&sim.snapshot(), train_id).state,
                 TrainSnapshotState::Ready { station: a }
             );
-            sim.apply_command(TrainCommand::Accelerate {
-                train_id: TrainId(0),
-            })
-            .unwrap();
+            sim.apply_command(TrainCommand::Accelerate { train_id })
+                .unwrap();
         } else {
             sim.step();
         }
         assert!(matches!(
-            sim.snapshot().trains[0].state,
+            Simulation::snapshot_train_by_id(&sim.snapshot(), train_id).state,
             TrainSnapshotState::Moving {
                 elapsed_seconds: 0,
                 ..

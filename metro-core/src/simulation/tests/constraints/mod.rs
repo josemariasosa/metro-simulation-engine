@@ -67,14 +67,18 @@ fn assert_exact_command(
     expected: Result<(), CommandError>,
 ) {
     let snapshot = simulation.snapshot();
+    let trains = committed_train_state(simulation);
     let resources = claims(simulation);
+    let next_train_id = simulation.next_train_id;
     let constraints = simulation.constraints.clone();
     let next_constraint_id = simulation.next_constraint_id;
 
     assert_eq!(command_const(simulation, train_id), expected);
 
     assert_eq!(simulation.snapshot(), snapshot);
+    assert_eq!(committed_train_state(simulation), trains);
     assert_eq!(claims(simulation), resources);
+    assert_eq!(simulation.next_train_id, next_train_id);
     assert_eq!(simulation.constraints, constraints);
     assert_eq!(simulation.next_constraint_id, next_constraint_id);
 }

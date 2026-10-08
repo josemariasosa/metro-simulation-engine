@@ -6,19 +6,6 @@ use metro_core::simulation::Simulation;
 use metro_core::snapshot::TrainSnapshotState;
 use metro_core::{AtStationState, Direction, Train, TrainId, TrainState};
 
-// fn manual_a_b_simulation() -> Simulation {
-//     manual_a_b_simulation_with_travel_seconds(10)
-// }
-
-// fn manual_a_b_simulation_with_travel_seconds(travel_seconds: u64) -> Simulation {
-//     let mut network = Network::new();
-//     let a = network.add_station("A");
-//     let b = network.add_station("B");
-//     network.connect_bidirectional(a, b, travel_seconds);
-//     let train = Train::new_manual(100, a, Direction::Forward, 3);
-//     Simulation::new(network, vec![train], DwellPolicy::new())
-// }
-
 #[test]
 fn manual_train_arrival_resets_velocity_and_starts_fresh_dwell() {
     let mut network = Network::new();
@@ -40,9 +27,7 @@ fn manual_train_arrival_resets_velocity_and_starts_fresh_dwell() {
 
     // Abandon a partially consumed dwell before its normal completion.
     simulation
-        .apply_command(TrainCommand::Accelerate {
-            train_id: TrainId(0),
-        })
+        .apply_command(TrainCommand::Accelerate { train_id })
         .unwrap();
     simulation.step();
     let moving = simulation.snapshot();
@@ -51,7 +36,7 @@ fn manual_train_arrival_resets_velocity_and_starts_fresh_dwell() {
         1
     );
     assert_eq!(
-        moving.trains[0].state,
+        Simulation::snapshot_train_by_id(&moving, train_id).state,
         TrainSnapshotState::Moving {
             from: StationId(0),
             to: StationId(1),
@@ -206,9 +191,7 @@ fn accelerate_manual_train_from_initial_dwell() {
     );
 
     // Departure is allowed before dwell completes; core chooses the destination.
-    let result = simulation.apply_command(TrainCommand::Accelerate {
-        train_id: TrainId(0),
-    });
+    let result = simulation.apply_command(TrainCommand::Accelerate { train_id });
 
     assert_eq!(result, Ok(()));
     assert_eq!(simulation.elapsed_seconds, before_time);
@@ -258,9 +241,7 @@ fn accelerate_manual_train_from_ready() {
         }
     );
 
-    let result = simulation.apply_command(TrainCommand::Accelerate {
-        train_id: TrainId(0),
-    });
+    let result = simulation.apply_command(TrainCommand::Accelerate { train_id });
 
     assert_eq!(result, Ok(()));
     assert_eq!(simulation.elapsed_seconds, before_time);
@@ -289,21 +270,27 @@ fn accelerate_while_manual_train_is_moving_is_idempotent() {
     network.connect_bidirectional(a, b, 10);
     let train = Train::new_manual(100, a, Direction::Forward, 3);
     let other_train = Train::new_manual(100, b, Direction::Backward, 3);
-    let mut simulation = Simulation::new(network, vec![train, other_train], DwellPolicy::new());
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let train_id = simulation.add_train(train).unwrap();
+    let _other_train_id = simulation.add_train(other_train).unwrap();
 
     simulation
-        .apply_command(TrainCommand::Accelerate {
-            train_id: TrainId(0),
-        })
+        .apply_command(TrainCommand::Accelerate { train_id })
         .unwrap();
     simulation.step();
 
     let before = simulation.snapshot();
     assert_eq!(before.elapsed_seconds, 1);
-    assert_eq!(before.trains[0].velocity, 1);
-    assert_eq!(before.trains[0].direction, Direction::Forward);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&before, train_id).velocity,
+        1
+    );
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&before, train_id).direction,
+        Direction::Forward
+    );
     assert!(matches!(
-        before.trains[0].state,
+        Simulation::snapshot_train_by_id(&before, train_id).state,
         TrainSnapshotState::Moving {
             from,
             to,
@@ -312,9 +299,7 @@ fn accelerate_while_manual_train_is_moving_is_idempotent() {
         } if from == a && to == b
     ));
 
-    let result = simulation.apply_command(TrainCommand::Accelerate {
-        train_id: TrainId(0),
-    });
+    let result = simulation.apply_command(TrainCommand::Accelerate { train_id });
     let after = simulation.snapshot();
 
     assert_eq!(result, Ok(()));
@@ -355,7 +340,10 @@ fn manual_train_becomes_ready_after_dwell_completes() {
             state: AtStationState::Ready,
         }
     );
-    assert_eq!(simulation.snapshot().trains[0].velocity, 0);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
+        0
+    );
 }
 
 #[test]
@@ -382,7 +370,10 @@ fn manual_train_remains_ready_without_input() {
             state: AtStationState::Ready,
         }
     );
-    assert_eq!(simulation.snapshot().trains[0].velocity, 0);
+    assert_eq!(
+        Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
+        0
+    );
 
     for elapsed_seconds in 4..=5 {
         simulation.step();
@@ -390,7 +381,10 @@ fn manual_train_remains_ready_without_input() {
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
         assert_eq!(simulation.train(train_id).state(), ready_state);
         assert_eq!(simulation.train(train_id).direction(), direction);
-        assert_eq!(simulation.snapshot().trains[0].velocity, 0);
+        assert_eq!(
+            Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
+            0
+        );
     }
 }
 
@@ -409,7 +403,7 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
     }
     let ready_snapshot = simulation.snapshot();
     assert_eq!(
-        ready_snapshot.trains[0].state,
+        Simulation::snapshot_train_by_id(&ready_snapshot, train_id).state,
         TrainSnapshotState::Ready { station: b }
     );
 
@@ -424,7 +418,10 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
                 state: AtStationState::Ready,
             }
         );
-        assert_eq!(simulation.snapshot().trains[0].velocity, 0);
+        assert_eq!(
+            Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
+            0
+        );
         assert_eq!(simulation.snapshot().trains, ready_snapshot.trains);
     }
     assert_eq!(ready_snapshot.elapsed_seconds, 3);
@@ -439,7 +436,7 @@ fn assert_command_unchanged(
     let before = simulation.snapshot();
     let domain_before: Vec<_> = simulation
         .trains()
-        .map(|(id, t)| (id, t.capacity(), t.state(), t.direction()))
+        .map(|(id, t)| (id, t.state(), t.velocity(), t.capacity(), t.direction()))
         .collect();
     assert_eq!(
         simulation.apply_command(TrainCommand::Accelerate { train_id }),
@@ -448,7 +445,7 @@ fn assert_command_unchanged(
     assert_eq!(simulation.snapshot(), before);
     let domain_after: Vec<_> = simulation
         .trains()
-        .map(|(id, t)| (id, t.capacity(), t.state(), t.direction()))
+        .map(|(id, t)| (id, t.state(), t.velocity(), t.capacity(), t.direction()))
         .collect();
     assert_eq!(domain_after, domain_before);
 }
@@ -461,15 +458,17 @@ fn blocked_manual_intent_is_not_buffered_when_destination_becomes_available() {
     let c = network.add_station("C");
     network.connect_bidirectional(a, b, 2);
     network.connect_bidirectional(b, c, 2);
-    let trains = vec![
+    let trains = [
         Train::new_manual(100, a, Direction::Forward, 3),
         Train::new_manual(100, b, Direction::Forward, 3),
     ];
-    let mut simulation = Simulation::new(network, trains, DwellPolicy::new());
-    assert_command_unchanged(&mut simulation, TrainId(0), Err(CommandError::Blocked));
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let first_id = simulation.add_train(trains[0].clone()).unwrap();
+    let second_id = simulation.add_train(trains[1].clone()).unwrap();
+    assert_command_unchanged(&mut simulation, first_id, Err(CommandError::Blocked));
     simulation
         .apply_command(TrainCommand::Accelerate {
-            train_id: TrainId(1),
+            train_id: second_id,
         })
         .unwrap();
     assert_eq!(simulation.elapsed_seconds, 0);
@@ -481,7 +480,7 @@ fn blocked_manual_intent_is_not_buffered_when_destination_becomes_available() {
         let train = snapshot
             .trains
             .iter()
-            .find(|train| train.id == TrainId(0))
+            .find(|train| train.id == first_id)
             .unwrap();
         assert_eq!(train.direction, Direction::Forward);
         assert_eq!(train.velocity, 0);
@@ -499,16 +498,14 @@ fn blocked_manual_intent_is_not_buffered_when_destination_becomes_available() {
     }
 
     simulation
-        .apply_command(TrainCommand::Accelerate {
-            train_id: TrainId(0),
-        })
+        .apply_command(TrainCommand::Accelerate { train_id: first_id })
         .unwrap();
     let snapshot = simulation.snapshot();
     assert_eq!(snapshot.elapsed_seconds, 3);
     let train = snapshot
         .trains
         .iter()
-        .find(|train| train.id == TrainId(0))
+        .find(|train| train.id == first_id)
         .unwrap();
     assert_eq!(train.direction, Direction::Forward);
     assert_eq!(train.velocity, 1);
@@ -531,7 +528,7 @@ fn command_rejections_preserve_all_trains_and_timers() {
     let isolated = network.add_station("Isolated");
     let unrelated = network.add_station("Unrelated");
     network.connect_bidirectional(a, b, 10);
-    let trains = vec![
+    let trains = [
         Train::new(100, a, Direction::Forward, 3),
         Train::new_manual(100, isolated, Direction::Forward, 3),
         Train::new_manual(100, unrelated, Direction::Forward, 3),
@@ -556,7 +553,7 @@ fn command_rejections_preserve_all_trains_and_timers() {
         assert_command_unchanged(&mut simulation, train_id_1, Err(CommandError::NotManual));
         assert_command_unchanged(
             &mut simulation,
-            TrainId(1),
+            train_id_2,
             Err(CommandError::NoOutgoingTrack),
         );
         if steps < 3 {
@@ -585,7 +582,7 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
     let train = Train::new_manual(100, b, Direction::Backward, 3);
     let other = Train::new(200, a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
-    let _ = simulation.add_train(other).unwrap();
+    let _other_id = simulation.add_train(other).unwrap();
     let train_id = simulation.add_train(train).unwrap();
 
     simulation
@@ -607,9 +604,7 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
             Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
             1
         );
-        // Include the unrelated train's raw dwell timers, which snapshots collapse
-        // to remaining_seconds, at both zero and nonzero traversal time.
-        assert_command_unchanged(&mut simulation, TrainId(1), Ok(()));
+        assert_command_unchanged(&mut simulation, train_id, Ok(()));
         if elapsed_seconds == 0 {
             simulation.step();
         }
@@ -621,8 +616,9 @@ fn non_manual_validation_precedes_departure_selection() {
     let mut network = Network::new();
     let station = network.add_station("Isolated");
     let train = Train::new(100, station, Direction::Forward, 3);
-    let mut simulation = Simulation::new(network, vec![train], DwellPolicy::new());
-    assert_command_unchanged(&mut simulation, TrainId(0), Err(CommandError::NotManual));
+    let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
+    let train_id = simulation.add_train(train).unwrap();
+    assert_command_unchanged(&mut simulation, train_id, Err(CommandError::NotManual));
 }
 
 #[test]
@@ -726,8 +722,6 @@ fn acceleration_selects_current_direction_or_reverse_fallback() {
 fn manual_round_trip_matches_spec_002_vertical_slice() {
     use Direction::{Backward, Forward};
     use TrainSnapshotState::{Dwelling, Moving, Ready};
-    let a = StationId(0);
-    let b = StationId(1);
     let mut network = Network::new();
     let a = network.add_station("A");
     let b = network.add_station("B");
@@ -739,9 +733,10 @@ fn manual_round_trip_matches_spec_002_vertical_slice() {
     let assert_train = |simulation: &Simulation, time, direction, velocity, state| {
         let snapshot = simulation.snapshot();
         assert_eq!(snapshot.elapsed_seconds, time);
-        assert_eq!(snapshot.trains[0].direction, direction);
-        assert_eq!(snapshot.trains[0].velocity, velocity);
-        assert_eq!(snapshot.trains[0].state, state);
+        let train = Simulation::snapshot_train_by_id(&snapshot, train_id);
+        assert_eq!(train.direction, direction);
+        assert_eq!(train.velocity, velocity);
+        assert_eq!(train.state, state);
     };
     let dwelling = |station, remaining_seconds| Dwelling {
         station,
@@ -753,9 +748,7 @@ fn manual_round_trip_matches_spec_002_vertical_slice() {
         elapsed_seconds,
         travel_seconds: 2,
     };
-    let accelerate = TrainCommand::Accelerate {
-        train_id: TrainId(0),
-    };
+    let accelerate = TrainCommand::Accelerate { train_id };
 
     assert_train(&simulation, 0, Forward, 0, dwelling(a, 3));
     simulation.step();
@@ -764,7 +757,7 @@ fn manual_round_trip_matches_spec_002_vertical_slice() {
     assert_train(&simulation, 1, Forward, 1, moving(a, b, 0));
     simulation.step();
     assert_train(&simulation, 2, Forward, 1, moving(a, b, 1));
-    assert_command_unchanged(&mut simulation, TrainId(0), Ok(()));
+    assert_command_unchanged(&mut simulation, train_id, Ok(()));
     simulation.step();
     assert_train(&simulation, 3, Forward, 0, dwelling(b, 3));
     for _ in 0..3 {
@@ -784,128 +777,3 @@ fn manual_round_trip_matches_spec_002_vertical_slice() {
     assert_eq!(simulation.apply_command(accelerate), Ok(()));
     assert_train(&simulation, 9, Forward, 1, moving(a, b, 0));
 }
-
-// #[test]
-// fn ordered_commands_and_steps_are_deterministic_despite_observation_frequency() {
-//     let mut frequent = manual_a_b_simulation_with_travel_seconds(2);
-//     let mut sparse = manual_a_b_simulation_with_travel_seconds(2);
-//     let accelerate = TrainCommand::Accelerate {
-//         train_id: TrainId(0),
-//     };
-//     let unknown = TrainCommand::Accelerate {
-//         train_id: TrainId(99),
-//     };
-//     // None is one complete step; commands commit between those steps.
-//     let trace = [
-//         None,
-//         Some(accelerate),
-//         None,
-//         Some(accelerate),
-//         Some(unknown),
-//         None,
-//         None,
-//         None,
-//         None,
-//         None,
-//         Some(accelerate),
-//         None,
-//         None,
-//         Some(accelerate),
-//         None,
-//     ];
-//     for operation in trace {
-//         frequent.snapshot();
-//         frequent.snapshot();
-//         match operation {
-//             Some(command) => {
-//                 let expected = if command == unknown {
-//                     Err(CommandError::UnknownTrain)
-//                 } else {
-//                     Ok(())
-//                 };
-//                 assert_eq!(frequent.apply_command(command), expected);
-//                 assert_eq!(sparse.apply_command(command), expected);
-//             }
-//             None => {
-//                 frequent.step();
-//                 sparse.step();
-//             }
-//         }
-//         frequent.snapshot();
-//         // Compare committed domain state at every boundary without observing sparse.
-//         assert_eq!(frequent.elapsed_seconds, sparse.elapsed_seconds);
-//         assert_eq!(
-//             frequent.trains(train_id).state(),
-//             sparse.trains()[0].train.state()
-//         );
-//         assert_eq!(
-//             frequent.trains()[0].train.direction(),
-//             sparse.trains()[0].train.direction()
-//         );
-//     }
-//     assert_eq!(frequent.snapshot(), sparse.snapshot());
-// }
-
-// #[test]
-// fn retained_snapshot_survives_command_at_unchanged_timestamp() {
-//     let mut simulation = manual_a_b_simulation();
-//     let untouched = manual_a_b_simulation();
-//     let retained = simulation.snapshot();
-//     let expected = retained.clone();
-//     assert_eq!(
-//         simulation.apply_command(TrainCommand::Accelerate {
-//             train_id: TrainId(0)
-//         }),
-//         Ok(())
-//     );
-//     let committed = simulation.snapshot();
-//     assert_eq!(retained, expected);
-//     assert_eq!(retained, untouched.snapshot());
-//     assert_eq!(committed.elapsed_seconds, retained.elapsed_seconds);
-//     assert_ne!(committed, untouched.snapshot());
-//     assert_eq!(committed.trains[0].velocity, 1);
-//     assert_eq!(
-//         committed.trains[0].state,
-//         TrainSnapshotState::Moving {
-//             from: StationId(0),
-//             to: StationId(1),
-//             elapsed_seconds: 0,
-//             travel_seconds: 10,
-//         }
-//     );
-// }
-
-// #[test]
-// fn command_before_step_consumes_traversal_but_step_before_command_consumes_dwell() {
-//     let mut command_first = manual_a_b_simulation();
-//     let mut step_first = manual_a_b_simulation();
-//     let accelerate = TrainCommand::Accelerate {
-//         train_id: TrainId(0),
-//     };
-//     assert_eq!(command_first.apply_command(accelerate), Ok(()));
-//     command_first.step();
-//     step_first.step();
-//     assert_eq!(
-//         step_first.snapshot().trains[0].state,
-//         TrainSnapshotState::Dwelling {
-//             station: StationId(0),
-//             remaining_seconds: 2,
-//         }
-//     );
-//     assert_eq!(step_first.apply_command(accelerate), Ok(()));
-//     for (simulation, traversal_elapsed) in [(&command_first, 1), (&step_first, 0)] {
-//         let snapshot = simulation.snapshot();
-//         assert_eq!(snapshot.elapsed_seconds, 1);
-//         assert_eq!(snapshot.trains[0].velocity, 1);
-//         assert_eq!(snapshot.trains[0].direction, Direction::Forward);
-//         assert_eq!(
-//             snapshot.trains[0].state,
-//             TrainSnapshotState::Moving {
-//                 from: StationId(0),
-//                 to: StationId(1),
-//                 elapsed_seconds: traversal_elapsed,
-//                 travel_seconds: 10,
-//             }
-//         );
-//     }
-// }

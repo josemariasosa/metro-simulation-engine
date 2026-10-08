@@ -4,12 +4,16 @@ use crate::domain::departure::{can_admit_departure, select_departure_candidate};
 use crate::domain::resource::ResourceView;
 use crate::domain::train::TrainId;
 use crate::simulation::Simulation;
-use crate::simulation::tests::SimulationFixture;
+use crate::simulation::tests::{SimulationFixture, committed_train_state};
 use crate::{AtStationState, Direction, DwellPolicy, Train, TrainState};
 
 fn assert_blocked_unchanged(simulation: &mut Simulation, train_id: TrainId) {
     let before = simulation.snapshot();
+    let trains_before = committed_train_state(simulation);
     let resources_before = ResourceView::derive(simulation.trains());
+    let next_train_id_before = simulation.next_train_id;
+    let constraints_before = simulation.constraints.clone();
+    let next_constraint_id_before = simulation.next_constraint_id;
 
     assert_eq!(
         simulation.apply_command(TrainCommand::Accelerate { train_id }),
@@ -17,7 +21,11 @@ fn assert_blocked_unchanged(simulation: &mut Simulation, train_id: TrainId) {
     );
 
     assert_eq!(simulation.snapshot(), before);
+    assert_eq!(committed_train_state(simulation), trains_before);
     assert_eq!(ResourceView::derive(simulation.trains()), resources_before,);
+    assert_eq!(simulation.next_train_id, next_train_id_before);
+    assert_eq!(simulation.constraints, constraints_before);
+    assert_eq!(simulation.next_constraint_id, next_constraint_id_before);
 }
 
 #[test]
