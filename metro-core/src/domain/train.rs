@@ -102,7 +102,7 @@ impl Train {
         self.capacity
     }
 
-    pub(crate) fn velocity(&self) -> u8 {
+    pub fn velocity(&self) -> u8 {
         self.velocity
     }
 
@@ -190,6 +190,36 @@ impl Train {
 
 #[cfg(test)]
 impl Train {
+    pub(crate) fn moving_train(from: StationId, to: StationId, direction: Direction) -> Train {
+        use crate::DwellPolicy;
+
+        let mut train = Train::new(100, from, direction, DwellPolicy::default_dwell_seconds());
+        train.set_moving_for_test(from, to, 0);
+        train
+    }
+
+    pub(crate) fn manual(station: StationId, direction: Direction) -> Train {
+        use crate::DwellPolicy;
+
+        Train::new_manual(
+            100,
+            station,
+            direction,
+            DwellPolicy::default_dwell_seconds(),
+        )
+    }
+
+    pub(crate) fn automatic(station: StationId, direction: Direction) -> Train {
+        use crate::DwellPolicy;
+
+        Train::new(
+            100,
+            station,
+            direction,
+            DwellPolicy::default_dwell_seconds(),
+        )
+    }
+
     pub(crate) fn set_moving_for_test(
         &mut self,
         from: StationId,

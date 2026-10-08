@@ -3,9 +3,6 @@ mod domain;
 pub mod simulation;
 pub mod snapshot;
 
-#[cfg(test)]
-pub mod test_utils;
-
 pub use domain::constraint::{
     ConstraintError, ConstraintId, ConstraintOrigin, OperationalConstraint,
 };

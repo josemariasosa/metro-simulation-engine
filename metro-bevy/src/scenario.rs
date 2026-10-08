@@ -35,7 +35,9 @@ pub(super) fn initialize_scenario(app: &mut App) {
 
     let train = Train::new_manual(100, a, Direction::Forward, 3);
     let mut simulation = Simulation::new(network, vec![], DwellPolicy::new());
-    let player_id = simulation.add_train(train);
+    let player_id = simulation
+        .add_train(train)
+        .expect("initial player train must be valid in the empty scenario");
     let snapshot = simulation.snapshot();
 
     app.insert_resource(CoreSimulation(simulation))
@@ -106,11 +108,7 @@ mod tests {
                 );
             }
         }
-        let core_train = simulation
-            .trains()
-            .iter()
-            .find(|train| train.id == player_id)
-            .expect("configured player must be owned by the simulation");
-        assert_eq!(core_train.train.capacity(), 100);
+        let core_train = simulation.train(player_id).unwrap();
+        assert_eq!(core_train.capacity(), 100);
     }
 }
