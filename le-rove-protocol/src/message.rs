@@ -1,10 +1,33 @@
-use crate::identity::{CommandId, StationId, TrainId};
+use crate::identity::{StationId, TrainId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Message {
     Command(Command),
     CommandResult(CommandResult),
     Event(Event),
+}
+
+#[repr(u8)]
+pub enum MessageKind {
+    Depart = 0x01,
+    EmergencyStop = 0x02,
+    Accepted = 0x10,
+    Rejected = 0x11,
+    Departed = 0x20,
+    Stopped = 0x21,
+}
+
+impl Message {
+    pub fn kind(&self) -> MessageKind {
+        match self {
+            Message::Command(Command::Depart { .. }) => MessageKind::Depart,
+
+            Message::Command(Command::EmergencyStop { .. }) => MessageKind::EmergencyStop,
+
+            // Las otras cuatro variantes vendrán después.
+            _ => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
