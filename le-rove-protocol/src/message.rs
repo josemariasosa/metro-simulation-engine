@@ -1,4 +1,8 @@
-use crate::identity::{StationId, TrainId};
+use crate::codec::Field;
+use crate::{
+    DecodeError,
+    identity::{StationId, TrainId},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Message {
@@ -21,6 +25,7 @@ impl Message {
 }
 
 #[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageKind {
     Depart = 0x01,
     EmergencyStop = 0x02,
@@ -31,7 +36,7 @@ pub enum MessageKind {
 }
 
 impl MessageKind {
-    pub const fn encoded_len(self) -> usize {
+    pub const fn encoded_len(&self) -> usize {
         match self {
             Self::Depart => 16,
             Self::EmergencyStop => 13,
@@ -40,6 +45,24 @@ impl MessageKind {
             Self::Departed => 16,
             Self::Stopped => 18,
         }
+    }
+
+    pub fn try_from(value: u8) -> Result<Self, DecodeError> {
+        match value {
+            0x01 => Ok(MessageKind::Depart),
+            0x02 => Ok(MessageKind::EmergencyStop),
+            0x10 => Ok(MessageKind::Accepted),
+            0x11 => Ok(MessageKind::Rejected),
+            0x20 => Ok(MessageKind::Departed),
+            0x21 => Ok(MessageKind::Stopped),
+            _ => Err(DecodeError::UnknownMessageKind { actual: value }),
+        }
+    }
+}
+
+impl From<u8> for MessageKind {
+    fn from(value: u8) -> Self {
+        MessageKind::try_from(value).expect("Invalid MessageKind value")
     }
 }
 
@@ -61,6 +84,18 @@ pub enum Command {
 pub enum CommandKind {
     Depart = 0x01,
     EmergencyStop = 0x02,
+}
+
+impl CommandKind {
+    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+        match value {
+            0x01 => Ok(CommandKind::Depart),
+            0x02 => Ok(CommandKind::EmergencyStop),
+            _ => Err(DecodeError::InvalidValue {
+                field: Field::CommandKind,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +132,19 @@ pub enum EmergencyReason {
     BrainSafetyDecision = 0x02,
 }
 
+impl EmergencyReason {
+    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+        match value {
+            0x01 => Ok(EmergencyReason::OperatorRequest),
+            0x02 => Ok(EmergencyReason::BrainSafetyDecision),
+            _ => Err(DecodeError::InvalidDiscriminant {
+                field: Field::EmergencyReason,
+                actual: value,
+            }),
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RejectionReason {
@@ -108,6 +156,22 @@ pub enum RejectionReason {
     UnableToExecute = 0x06,
 }
 
+impl RejectionReason {
+    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+        match value {
+            0x01 => Ok(RejectionReason::InvalidState),
+            0x02 => Ok(RejectionReason::LocationMismatch),
+            0x03 => Ok(RejectionReason::UnknownStation),
+            0x04 => Ok(RejectionReason::UnsupportedMovement),
+            0x05 => Ok(RejectionReason::SafetyInhibit),
+            0x06 => Ok(RejectionReason::UnableToExecute),
+            _ => Err(DecodeError::InvalidValue {
+                field: Field::RejectionReason,
+            }),
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
@@ -115,6 +179,21 @@ pub enum StopReason {
     Obstacle = 0x02,
     LocalStop = 0x03,
     Unspecified = 0x04,
+}
+
+impl StopReason {
+    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+        match value {
+            0x01 => Ok(StopReason::EmergencyCommand),
+            0x02 => Ok(StopReason::Obstacle),
+            0x03 => Ok(StopReason::LocalStop),
+            0x04 => Ok(StopReason::Unspecified),
+            _ => Err(DecodeError::InvalidDiscriminant {
+                field: Field::StopReason,
+                actual: value,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,4 +218,17 @@ pub enum LocationKind {
     Unknown = 0x00,
     AtStation = 0x01,
     OnSegment = 0x02,
+}
+
+impl LocationKind {
+    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+        match value {
+            0x00 => Ok(LocationKind::Unknown),
+            0x01 => Ok(LocationKind::AtStation),
+            0x02 => Ok(LocationKind::OnSegment),
+            _ => Err(DecodeError::InvalidValue {
+                field: Field::LocationKind,
+            }),
+        }
+    }
 }

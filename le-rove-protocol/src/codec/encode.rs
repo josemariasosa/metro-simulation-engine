@@ -1,7 +1,6 @@
 use crate::frame::Frame;
 use crate::message::{
     Command, CommandKind, CommandResult, Event, Location, Message, MessageKind, RejectionReason,
-    StopReason,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -12,6 +11,10 @@ pub enum EncodeError {
 
 pub fn encode(frame: &Frame, output: &mut [u8]) -> Result<usize, EncodeError> {
     if frame.source == frame.destination {
+        return Err(EncodeError::InvalidValue);
+    }
+
+    if !frame.has_valid_command_id() {
         return Err(EncodeError::InvalidValue);
     }
 
@@ -37,7 +40,7 @@ fn encode_depart(frame: &Frame, output: &mut [u8]) -> Result<usize, EncodeError>
     let required = frame.message.kind().encoded_len();
 
     if let Message::Command(Command::Depart { train_id, from, to }) = &frame.message {
-        if frame.command_id.is_none() || from == to {
+        if from == to {
             return Err(EncodeError::InvalidValue);
         }
 
@@ -61,10 +64,6 @@ fn encode_emergency_stop(frame: &Frame, output: &mut [u8]) -> Result<usize, Enco
     let required = frame.message.kind().encoded_len();
 
     if let Message::Command(Command::EmergencyStop { train_id, reason }) = &frame.message {
-        if frame.command_id.is_none() {
-            return Err(EncodeError::InvalidValue);
-        }
-
         if output.len() < required {
             return Err(EncodeError::BufferTooSmall {
                 required,
@@ -88,10 +87,6 @@ fn encode_accepted(frame: &Frame, output: &mut [u8]) -> Result<usize, EncodeErro
         command_kind,
     }) = &frame.message
     {
-        if frame.command_id.is_none() {
-            return Err(EncodeError::InvalidValue);
-        }
-
         if output.len() < required {
             return Err(EncodeError::BufferTooSmall {
                 required,
@@ -116,9 +111,8 @@ fn encode_rejected(frame: &Frame, output: &mut [u8]) -> Result<usize, EncodeErro
         reason,
     }) = &frame.message
     {
-        if frame.command_id.is_none()
-            || (*command_kind == CommandKind::EmergencyStop
-                && *reason != RejectionReason::UnableToExecute)
+        if *command_kind == CommandKind::EmergencyStop
+            && *reason != RejectionReason::UnableToExecute
         {
             return Err(EncodeError::InvalidValue);
         }
@@ -143,7 +137,7 @@ fn encode_departed(frame: &Frame, output: &mut [u8]) -> Result<usize, EncodeErro
     let required = frame.message.kind().encoded_len();
 
     if let Message::Event(Event::Departed { train_id, from, to }) = &frame.message {
-        if frame.command_id.is_none() || from == to {
+        if from == to {
             return Err(EncodeError::InvalidValue);
         }
 
@@ -172,20 +166,10 @@ fn encode_stopped(frame: &Frame, output: &mut [u8]) -> Result<usize, EncodeError
         location,
     }) = &frame.message
     {
-        if reason == &StopReason::EmergencyCommand {
-            if frame.command_id.is_none() {
-                return Err(EncodeError::InvalidValue);
-            }
-        } else {
-            if frame.command_id.is_some() {
-                return Err(EncodeError::InvalidValue);
-            }
-        }
-
-        if let Location::OnSegment { from, to } = location {
-            if from == to {
-                return Err(EncodeError::InvalidValue);
-            }
+        if let Location::OnSegment { from, to } = location
+            && from == to
+        {
+            return Err(EncodeError::InvalidValue);
         }
 
         if output.len() < required {

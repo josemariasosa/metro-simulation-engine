@@ -8,4 +8,4 @@ pub use frame::Frame;
 pub use identity::{CommandId, NodeId, StationId, TrainId};
 pub use message::{Command, EmergencyReason, Message};
 
-pub use codec::{EncodeError, encode};
+pub use codec::{DecodeError, EncodeError, decode, encode};

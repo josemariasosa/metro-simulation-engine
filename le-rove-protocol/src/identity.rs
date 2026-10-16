@@ -6,8 +6,12 @@ impl NodeId {
         if value == 0 { None } else { Some(Self(value)) }
     }
 
-    pub fn get(&self) -> u16 {
+    pub const fn get(&self) -> u16 {
         self.0
+    }
+
+    pub fn from_le_bytes(value: &[u8; 2]) -> Option<Self> {
+        Self::new(u16::from_le_bytes(*value))
     }
 }
 
@@ -19,8 +23,12 @@ impl TrainId {
         if value == 0 { None } else { Some(Self(value)) }
     }
 
-    pub fn get(&self) -> u16 {
+    pub const fn get(&self) -> u16 {
         self.0
+    }
+
+    pub fn from_le_bytes(value: &[u8; 2]) -> Option<Self> {
+        Self::new(u16::from_le_bytes(*value))
     }
 }
 
@@ -32,8 +40,12 @@ impl StationId {
         if value == 0 { None } else { Some(Self(value)) }
     }
 
-    pub fn get(&self) -> u16 {
+    pub const fn get(&self) -> u16 {
         self.0
+    }
+
+    pub fn from_le_bytes(value: &[u8; 2]) -> Option<Self> {
+        Self::new(u16::from_le_bytes(*value))
     }
 }
 
@@ -45,8 +57,12 @@ impl CommandId {
         if value == 0 { None } else { Some(Self(value)) }
     }
 
-    pub fn get(&self) -> u32 {
+    pub const fn get(&self) -> u32 {
         self.0
+    }
+
+    pub fn from_le_bytes(value: &[u8; 4]) -> Option<Self> {
+        Self::new(u32::from_le_bytes(*value))
     }
 }
 
