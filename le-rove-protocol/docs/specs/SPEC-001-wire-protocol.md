@@ -18,7 +18,9 @@ The normative words MUST, MUST NOT, SHOULD, and MAY describe requirements for a 
 - **Node:** a logical communicating endpoint, independent of its radio or network address.
 - **Train:** a logical railway vehicle. Its identity is distinct from the identity of its controller node.
 
-Commands travel Brain → Train. Results and events travel Train → Brain. The header identifies the sender, recipient, and subject train. A deployment must configure which node controls which train and which node is its Brain; discovery and provisioning are not specified here.
+Commands travel Brain → Train. Results and events travel Train → Brain. The common header identifies the sender and recipient and carries command correlation. Each of the six message bodies identifies its subject train. A deployment must configure which node controls which train and which node is its Brain; discovery and provisioning are not specified here.
+
+`NodeId` and `TrainId` are separate because a communication endpoint is not a railway vehicle. A controller node and its vehicle may have different identities; matching numeric values do not establish a relationship. The common header is independent of railway entities so that future Brain ↔ Station, Station ↔ Train, and Infrastructure ↔ Brain communication need not name a train. This amendment defines no such messages and introduces no generic entity abstraction. The configured node-to-train relationship remains an endpoint responsibility.
 
 The codec validates the frame's structural and local semantic rules. Endpoint authorization, matching a result against a previously sent command, and checking a station against a configured railway are receiver responsibilities, not codec operations.
 
@@ -26,7 +28,7 @@ The codec validates the frame's structural and local semantic rules. Endpoint au
 
 | Identity | Encoding | Valid values | Meaning |
 | --- | --- | --- | --- |
-| `NodeId` | unsigned 16-bit | 1–65535 | Logical Brain or Train endpoint |
+| `NodeId` | unsigned 16-bit | 1–65535 | Logical communication endpoint (Brain or Train in current messages) |
 | `TrainId` | unsigned 16-bit | 1–65535 | Subject vehicle |
 | `StationId` | unsigned 16-bit | 1–65535 | Station in the configured railway |
 | `CommandId` | unsigned 32-bit | 1–4294967295 | Brain-issued command correlation identity |
@@ -49,11 +51,10 @@ Offsets are zero-based. There is no alignment padding.
 | 1 | 1 | `message_kind` | One of the discriminants below |
 | 2 | 2 | `source_node_id` | Nonzero |
 | 4 | 2 | `destination_node_id` | Nonzero; different from source |
-| 6 | 2 | `train_id` | Nonzero |
-| 8 | 4 | `command_id` | Correlation identity; zero only where explicitly allowed |
-| 12 | variable | Message body | Exact layout determined by message kind |
+| 6 | 4 | `command_id` | Correlation identity; zero only where explicitly allowed |
+| 10 | variable | Message body | Exact layout determined by message kind |
 
-The common header is 12 bytes. There is no magic number, length field, checksum, timestamp, session identifier, or reserved flag field. Frame boundaries come from the transport adapter; message kind determines exact length. A stream transport must supply its own boundary framing before invoking this decoder.
+The common header is 10 bytes and contains no railway entity identity. Each currently defined body begins with its own nonzero 16-bit `train_id` at offset 10; this is a rule of these six message definitions, not an implicit header field or a requirement on future message kinds. There is no magic number, length field, checksum, timestamp, session identifier, or reserved flag field. Frame boundaries come from the transport adapter; message kind determines exact length. A stream transport must supply its own boundary framing before invoking this decoder.
 
 Transport overhead is outside the 32-byte application limit. A transport adapter must not append bytes to this frame and still treat them as part of a valid v1 message. If its available application capacity is smaller than a message, that adapter cannot carry the message directly; fragmentation is not specified.
 
@@ -61,12 +62,16 @@ Transport overhead is outside the 32-byte application limit. A transport adapter
 
 | Kind | Category | Direction | Body bytes | Total bytes |
 | --- | --- | --- | --- | --- |
-| `0x01` `Depart` | Command | Brain → Train | 4 | 16 |
-| `0x02` `EmergencyStop` | Command | Brain → Train | 1 | 13 |
-| `0x10` `Accepted` | Command result | Train → Brain | 1 | 13 |
-| `0x11` `Rejected` | Command result | Train → Brain | 2 | 14 |
-| `0x20` `Departed` | Observed event | Train → Brain | 4 | 16 |
-| `0x21` `Stopped` | Observed event | Train → Brain | 6 | 18 |
+| `0x01` `Depart` | Command | Brain → Train | 6 | 16 |
+| `0x02` `EmergencyStop` | Command | Brain → Train | 3 | 13 |
+| `0x10` `Accepted` | Command result | Train → Brain | 3 | 13 |
+| `0x11` `Rejected` | Command result | Train → Brain | 4 | 14 |
+| `0x20` `Departed` | Observed event | Train → Brain | 6 | 16 |
+| `0x21` `Stopped` | Observed event | Train → Brain | 8 | 18 |
+
+The header shrinks from 12 to 10 bytes while every current body grows by two bytes, so total frame lengths are unchanged. Command ID moves from offset 8 to 6; train ID moves from header offset 6 to body offset 10. All remaining body fields retain their previous absolute offsets.
+
+This is a revision of an unimplemented v1 draft, not compatibility with the previous draft layout. Old-layout bytes MUST NOT be accepted through a fallback decoder. Their identical lengths mean they can sometimes decode as different valid values under the new layout; there is no reliable automatic layout detection. Any consumers of earlier draft vectors must update together.
 
 All other message-kind bytes are invalid in v1. Existing discriminants and layouts MUST NOT be reinterpreted. A future incompatible format requires a different version. Version negotiation and forward-compatible skipping are not part of v1: unknown versions or kinds are rejected.
 
@@ -76,6 +81,7 @@ All other message-kind bytes are invalid in v1. Existing discriminants and layou
 
 | Offset | Width | Field |
 | --- | --- | --- |
+| 10 | 2 | `train_id` (nonzero) |
 | 12 | 2 | `from_station_id` |
 | 14 | 2 | `to_station_id` |
 
@@ -89,6 +95,7 @@ The Train may reject a structurally valid command if it cannot accept that movem
 
 | Offset | Width | Field |
 | --- | --- | --- |
+| 10 | 2 | `train_id` (nonzero) |
 | 12 | 1 | `reason` |
 
 Command ID MUST be nonzero. Valid emergency-request reasons are:
@@ -106,6 +113,7 @@ Meaning: request an immediate stop of the subject train. It is addressed to one 
 
 | Offset | Width | Field |
 | --- | --- | --- |
+| 10 | 2 | `train_id` (nonzero) |
 | 12 | 1 | `command_kind` |
 
 `command_kind` MUST be `0x01` (`Depart`) or `0x02` (`EmergencyStop`). Command ID MUST be nonzero and identify the accepted command. Source/destination are reversed relative to that command; train identity is unchanged.
@@ -116,6 +124,7 @@ Meaning: the Train has accepted responsibility for acting on the request. It doe
 
 | Offset | Width | Field |
 | --- | --- | --- |
+| 10 | 2 | `train_id` (nonzero) |
 | 12 | 1 | `command_kind` |
 | 13 | 1 | `reason` |
 
@@ -138,6 +147,7 @@ Rejection means the Train did not accept the command. It does not assert that th
 
 | Offset | Width | Field |
 | --- | --- | --- |
+| 10 | 2 | `train_id` (nonzero) |
 | 12 | 2 | `from_station_id` |
 | 14 | 2 | `to_station_id` |
 
@@ -151,6 +161,7 @@ The receiver can validate agreement with the earlier command only if it retains 
 
 | Offset | Width | Field |
 | --- | --- | --- |
+| 10 | 2 | `train_id` (nonzero) |
 | 12 | 1 | `reason` |
 | 13 | 1 | `location_kind` |
 | 14 | 2 | `location_a` |
@@ -181,25 +192,25 @@ Meaning: the Train observed that it is stationary. It does not imply clearance o
 
 ## 6. Lifecycle and invariants
 
-The initial successful departure lifecycle is:
+In these examples, `train_id=T` is in each message body; `command_id` is in the common header. Results and correlated events MUST preserve the command body’s train identity. The initial successful departure lifecycle is:
 
 ```text
-Brain -> Train: Depart(command_id=C, from=A, to=B)
-Train -> Brain: Accepted(command_id=C, command_kind=Depart)
-Train -> Brain: Departed(command_id=C, from=A, to=B)
+Brain -> Train: Depart(train_id=T, command_id=C, from=A, to=B)
+Train -> Brain: Accepted(train_id=T, command_id=C, command_kind=Depart)
+Train -> Brain: Departed(train_id=T, command_id=C, from=A, to=B)
 ```
 
-The rejection alternative ends with `Rejected(C, Depart, reason)`, with no departure caused by that rejected command.
+The rejection alternative ends with `Rejected(train_id=T, command_id=C, command_kind=Depart, reason=...)`, with no departure caused by that rejected command.
 
 The emergency-stop lifecycle is:
 
 ```text
-Brain -> Train: EmergencyStop(command_id=E, reason=OperatorRequest)
-Train -> Brain: Accepted(command_id=E, command_kind=EmergencyStop)
-Train -> Brain: Stopped(command_id=E, reason=EmergencyCommand, location=...)
+Brain -> Train: EmergencyStop(train_id=T, command_id=E, reason=OperatorRequest)
+Train -> Brain: Accepted(train_id=T, command_id=E, command_kind=EmergencyStop)
+Train -> Brain: Stopped(train_id=T, command_id=E, reason=EmergencyCommand, location=...)
 ```
 
-An endpoint unable to undertake the emergency request reports `Rejected(E, EmergencyStop, UnableToExecute)`; that report provides no evidence of a safe stop. Local obstacle stopping may produce unsolicited `Stopped(0, Obstacle, ...)` without a preceding command.
+An endpoint unable to undertake the emergency request reports `Rejected(train_id=T, command_id=E, command_kind=EmergencyStop, reason=UnableToExecute)`; that report provides no evidence of a safe stop. Local obstacle stopping may produce unsolicited `Stopped(train_id=T, command_id=0, reason=Obstacle, location=...)` without a preceding command.
 
 For a single command execution, an endpoint MUST NOT generate contradictory accepted/rejected outcomes. Results describe the decision; events describe observations. Acceptance MUST precede generation of its correlated event, but this does not require delaying local physical safety action while transmitting a result.
 
@@ -209,7 +220,7 @@ The transport may lose or reorder frames. A Brain may therefore receive an event
 
 Within an uninterrupted Brain command-allocation lifetime, the Brain MUST assign a new nonzero command ID to each new logical command, across all destination trains and both command kinds. Results and correlated events echo it without allocating another identity.
 
-The tuple `(source Brain NodeId, CommandId)` is the proposed future command-deduplication key. Destination, train, command kind, and body form the associated immutable command content. Reuse of a key with different content is a protocol violation.
+The tuple `(source Brain NodeId, CommandId)` is the proposed future command-deduplication key. Destination, command kind, and body (including train identity) form the associated immutable command content. Reuse of a key with different content is a protocol violation.
 
 A future retransmission design would resend the same command with the same ID and content, allowing a receiver to recognize it instead of repeating physical action. **This specification implements neither duplicate suppression nor retransmission.** A codec decodes repeated identical bytes identically; it keeps no command history.
 
@@ -234,12 +245,12 @@ The decoder accepts exactly one complete frame and returns an owned, fixed-size 
 Validation proceeds in this order, giving deterministic errors:
 
 1. More than 32 input bytes: `FrameTooLong { actual }`.
-2. Fewer than 12 bytes: `HeaderTooShort { actual }`.
+2. Fewer than 10 bytes: `HeaderTooShort { actual }`.
 3. Version other than `0x01`: `UnsupportedVersion { actual }`.
 4. Unrecognized message kind: `UnknownMessageKind { actual }`.
 5. Length different from the exact length for that kind: `InvalidLength { expected, actual }`.
-6. Header validation in source, destination, train, command-ID order. Zero node/train IDs, equal source/destination, and zero command IDs except for `Stopped` produce `InvalidValue { field }`.
-7. Body fields in ascending offset order: unknown enum tags produce `InvalidDiscriminant { field, actual }`; invalid station IDs produce `InvalidValue { field }`.
+6. Header validation in source, destination, command-ID order. Zero node IDs, equal source/destination, and zero command IDs except for `Stopped` produce `InvalidValue { field }`.
+7. Body fields in ascending offset order, beginning with the nonzero `train_id` at offset 10: unknown enum tags produce `InvalidDiscriminant { field, actual }`; invalid train or station IDs produce `InvalidValue { field }`.
 8. Cross-field rules: equal departure endpoints (`to_station_id`), invalid rejection combination (`reason`), invalid stop-reason/command-ID combination (`command_id`), and location-field rules (`location_a`, then `location_b`) produce `InvalidValue { field }`.
 
 For `Stopped`, header command-ID validation is deferred to step 8 because zero/nonzero validity depends on its reason. Its location fields are validated in step 8 because their meaning depends on `location_kind`.
@@ -258,17 +269,17 @@ These vectors use Brain node `0x0001`, Train node `0x0002`, train `0x0003`, sour
 
 | Case | Exact bytes (hex) | Length |
 | --- | --- | --- |
-| Depart | `01 01 01 00 02 00 03 00 04 03 02 01 10 00 20 00` | 16 |
-| Accepted departure | `01 10 02 00 01 00 03 00 04 03 02 01 01` | 13 |
-| Rejected departure: location mismatch | `01 11 02 00 01 00 03 00 04 03 02 01 01 02` | 14 |
-| Departed | `01 20 02 00 01 00 03 00 04 03 02 01 10 00 20 00` | 16 |
-| EmergencyStop: operator | `01 02 01 00 02 00 03 00 05 03 02 01 01` | 13 |
-| Accepted emergency stop | `01 10 02 00 01 00 03 00 05 03 02 01 02` | 13 |
-| Rejected emergency stop: unable to execute | `01 11 02 00 01 00 03 00 05 03 02 01 02 06` | 14 |
-| Stopped: emergency command, on segment | `01 21 02 00 01 00 03 00 05 03 02 01 01 02 10 00 20 00` | 18 |
-| Stopped: obstacle, on segment | `01 21 02 00 01 00 03 00 00 00 00 00 02 02 10 00 20 00` | 18 |
-| Stopped: local, at station | `01 21 02 00 01 00 03 00 00 00 00 00 03 01 10 00 00 00` | 18 |
-| Stopped: unspecified, location unknown | `01 21 02 00 01 00 03 00 00 00 00 00 04 00 00 00 00 00` | 18 |
+| Depart | `01 01 01 00 02 00 04 03 02 01 03 00 10 00 20 00` | 16 |
+| Accepted departure | `01 10 02 00 01 00 04 03 02 01 03 00 01` | 13 |
+| Rejected departure: location mismatch | `01 11 02 00 01 00 04 03 02 01 03 00 01 02` | 14 |
+| Departed | `01 20 02 00 01 00 04 03 02 01 03 00 10 00 20 00` | 16 |
+| EmergencyStop: operator | `01 02 01 00 02 00 05 03 02 01 03 00 01` | 13 |
+| Accepted emergency stop | `01 10 02 00 01 00 05 03 02 01 03 00 02` | 13 |
+| Rejected emergency stop: unable to execute | `01 11 02 00 01 00 05 03 02 01 03 00 02 06` | 14 |
+| Stopped: emergency command, on segment | `01 21 02 00 01 00 05 03 02 01 03 00 01 02 10 00 20 00` | 18 |
+| Stopped: obstacle, on segment | `01 21 02 00 01 00 00 00 00 00 03 00 02 02 10 00 20 00` | 18 |
+| Stopped: local, at station | `01 21 02 00 01 00 00 00 00 00 03 00 03 01 10 00 00 00` | 18 |
+| Stopped: unspecified, location unknown | `01 21 02 00 01 00 00 00 00 00 03 00 04 00 00 00 00 00` | 18 |
 
 Each vector must be tested in both directions: decoding produces the specified fields, and encoding those fields produces exactly the listed bytes. The non-symmetric command IDs deliberately verify byte order.
 
@@ -281,6 +292,7 @@ These are requirements for later implementation, not tests implemented by this d
 - `decode(encode(message)) == message` for every message kind, each defined enum value in its valid context, and every location variant.
 - `encode(decode(bytes)) == bytes` for every valid fixed vector; no alternate padding or trailing-byte encodings.
 - Minimum and maximum valid identity values, including `CommandId = 0xFFFFFFFF`; zero command ID only for permitted unsolicited stops.
+- Node and train identities round-trip independently, including distinct values and coincident numeric values; the codec must not equate the identity namespaces.
 - Every valid encoded length matches the table and is at most 32 bytes.
 - Exact-sized output buffers succeed; each smaller capacity fails without changing the buffer. Oversized output buffers preserve bytes beyond the returned encoded prefix.
 - Invalid typed values are rejected without modifying the output buffer.
@@ -291,14 +303,15 @@ Use the fixed vectors as seeds and assert the exact error category and applicabl
 
 | Mutation/input | Expected error |
 | --- | --- |
-| Empty input or any input shorter than 12 bytes | `HeaderTooShort` |
+| Empty input or any input shorter than 10 bytes | `HeaderTooShort` |
 | 33 bytes | `FrameTooLong` |
 | Change a valid vector's version to `0x02` | `UnsupportedVersion` |
 | Change its kind to `0xFF` | `UnknownMessageKind` |
-| Truncate a known-kind vector to any length from 12 to one below its required length | `InvalidLength` |
+| Truncate a known-kind vector to any length from 10 to one below its required length | `InvalidLength` |
 | Append one byte to any valid vector | `InvalidLength` |
 | Pad a valid vector to 32 bytes | `InvalidLength` |
-| Zero source node, destination node, or train ID | `InvalidValue` for that field |
+| Zero source node or destination node in the header | `InvalidValue` for that field |
+| Zero body train ID at offsets 10–11, for each of the six kinds | `InvalidValue(train_id)` |
 | Make destination node equal source node | `InvalidValue(destination_node_id)` |
 | Zero a required command ID | `InvalidValue(command_id)` |
 | Zero a departure endpoint or make both endpoints equal | `InvalidValue` for the affected endpoint |
@@ -309,6 +322,8 @@ Use the fixed vectors as seeds and assert the exact error category and applicabl
 | Unknown location with any nonzero location field | `InvalidValue` for first invalid location field |
 | At-station location with zero A or nonzero B | `InvalidValue` for the affected location field |
 | Segment location with zero endpoint or equal endpoints | `InvalidValue` for the affected location field; equal endpoints identify B |
+
+For example, a `Depart` frame with both zero command ID and zero train ID must report `InvalidValue(command_id)` because header validation precedes body validation. A `Stopped` frame with both an invalid reason and zero train ID must report `InvalidValue(train_id)` because body validation proceeds by offset.
 
 Tests must also exercise multiple simultaneous errors to verify validation precedence, and bounded arbitrary byte inputs to demonstrate decoding without panics or out-of-bounds access. Repeated identical decoding must have no stateful effects.
 
@@ -322,7 +337,7 @@ This specification is ready for implementation review when reviewers approve the
 
 A later implementation satisfies SPEC-001 when:
 
-1. All six message kinds encode/decode according to these layouts and fixed vectors.
+1. All six message kinds encode/decode according to these layouts and fixed vectors, using the 10-byte entity-independent header and explicit body `train_id` at offsets 10–11. No train identity is inferred from a node identity.
 2. Results and events remain distinct, with the specified command correlation and zero-ID rules.
 3. All malformed-frame, round-trip, buffer, and build checks pass.
 4. Every encoded application frame is at most 32 bytes; all current messages have their exact declared lengths.
