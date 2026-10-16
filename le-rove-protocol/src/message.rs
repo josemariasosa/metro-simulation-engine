@@ -7,6 +7,19 @@ pub enum Message {
     Event(Event),
 }
 
+impl Message {
+    pub const fn kind(&self) -> MessageKind {
+        match self {
+            Message::Command(Command::Depart { .. }) => MessageKind::Depart,
+
+            Message::Command(Command::EmergencyStop { .. }) => MessageKind::EmergencyStop,
+
+            // Las otras cuatro variantes vendrán después.
+            _ => todo!(),
+        }
+    }
+}
+
 #[repr(u8)]
 pub enum MessageKind {
     Depart = 0x01,
@@ -17,15 +30,15 @@ pub enum MessageKind {
     Stopped = 0x21,
 }
 
-impl Message {
-    pub fn kind(&self) -> MessageKind {
+impl MessageKind {
+    pub const fn encoded_len(self) -> usize {
         match self {
-            Message::Command(Command::Depart { .. }) => MessageKind::Depart,
-
-            Message::Command(Command::EmergencyStop { .. }) => MessageKind::EmergencyStop,
-
-            // Las otras cuatro variantes vendrán después.
-            _ => todo!(),
+            Self::Depart => 16,
+            Self::EmergencyStop => 13,
+            Self::Accepted => 13,
+            Self::Rejected => 14,
+            Self::Departed => 16,
+            Self::Stopped => 18,
         }
     }
 }
