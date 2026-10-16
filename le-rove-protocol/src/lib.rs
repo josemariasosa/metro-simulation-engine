@@ -1,3 +1,5 @@
+#![no_std]
+
 mod codec;
 mod constants;
 mod frame;
