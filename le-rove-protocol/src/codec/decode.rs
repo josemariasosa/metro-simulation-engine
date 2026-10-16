@@ -139,7 +139,7 @@ fn parse_message_rejected(input: &[u8]) -> Result<Message, DecodeError> {
 
     if command_kind == CommandKind::EmergencyStop && reason != RejectionReason::UnableToExecute {
         return Err(DecodeError::InvalidValue {
-            field: Field::CommandKind,
+            field: Field::Reason,
         });
     }
 
@@ -929,7 +929,7 @@ mod tests {
         input[6..10].fill(0);
         input[13] = 0xFF;
 
-        assert_invalid_value(&input, Field::LocationKind);
+        assert_invalid_tag(&input, Field::LocationKind, 0xFF);
     }
 
     #[test]

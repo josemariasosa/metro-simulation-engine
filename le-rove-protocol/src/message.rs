@@ -91,8 +91,9 @@ impl CommandKind {
         match value {
             0x01 => Ok(CommandKind::Depart),
             0x02 => Ok(CommandKind::EmergencyStop),
-            _ => Err(DecodeError::InvalidValue {
+            _ => Err(DecodeError::InvalidDiscriminant {
                 field: Field::CommandKind,
+                actual: value,
             }),
         }
     }
@@ -165,8 +166,9 @@ impl RejectionReason {
             0x04 => Ok(RejectionReason::UnsupportedMovement),
             0x05 => Ok(RejectionReason::SafetyInhibit),
             0x06 => Ok(RejectionReason::UnableToExecute),
-            _ => Err(DecodeError::InvalidValue {
+            _ => Err(DecodeError::InvalidDiscriminant {
                 field: Field::RejectionReason,
+                actual: value,
             }),
         }
     }
@@ -226,8 +228,9 @@ impl LocationKind {
             0x00 => Ok(LocationKind::Unknown),
             0x01 => Ok(LocationKind::AtStation),
             0x02 => Ok(LocationKind::OnSegment),
-            _ => Err(DecodeError::InvalidValue {
+            _ => Err(DecodeError::InvalidDiscriminant {
                 field: Field::LocationKind,
+                actual: value,
             }),
         }
     }
