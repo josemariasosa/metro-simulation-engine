@@ -46,8 +46,12 @@ impl MessageKind {
             Self::Stopped => 18,
         }
     }
+}
 
-    pub fn try_from(value: u8) -> Result<Self, DecodeError> {
+impl TryFrom<u8> for MessageKind {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x01 => Ok(MessageKind::Depart),
             0x02 => Ok(MessageKind::EmergencyStop),
@@ -57,12 +61,6 @@ impl MessageKind {
             0x21 => Ok(MessageKind::Stopped),
             _ => Err(DecodeError::UnknownMessageKind { actual: value }),
         }
-    }
-}
-
-impl From<u8> for MessageKind {
-    fn from(value: u8) -> Self {
-        MessageKind::try_from(value).expect("Invalid MessageKind value")
     }
 }
 
@@ -86,8 +84,10 @@ pub enum CommandKind {
     EmergencyStop = 0x02,
 }
 
-impl CommandKind {
-    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+impl TryFrom<u8> for CommandKind {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x01 => Ok(CommandKind::Depart),
             0x02 => Ok(CommandKind::EmergencyStop),
@@ -133,8 +133,10 @@ pub enum EmergencyReason {
     BrainSafetyDecision = 0x02,
 }
 
-impl EmergencyReason {
-    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+impl TryFrom<u8> for EmergencyReason {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x01 => Ok(EmergencyReason::OperatorRequest),
             0x02 => Ok(EmergencyReason::BrainSafetyDecision),
@@ -157,8 +159,10 @@ pub enum RejectionReason {
     UnableToExecute = 0x06,
 }
 
-impl RejectionReason {
-    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+impl TryFrom<u8> for RejectionReason {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x01 => Ok(RejectionReason::InvalidState),
             0x02 => Ok(RejectionReason::LocationMismatch),
@@ -183,8 +187,10 @@ pub enum StopReason {
     Unspecified = 0x04,
 }
 
-impl StopReason {
-    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+impl TryFrom<u8> for StopReason {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x01 => Ok(StopReason::EmergencyCommand),
             0x02 => Ok(StopReason::Obstacle),
@@ -222,8 +228,10 @@ pub enum LocationKind {
     OnSegment = 0x02,
 }
 
-impl LocationKind {
-    pub const fn try_from(value: u8) -> Result<Self, DecodeError> {
+impl TryFrom<u8> for LocationKind {
+    type Error = DecodeError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x00 => Ok(LocationKind::Unknown),
             0x01 => Ok(LocationKind::AtStation),
