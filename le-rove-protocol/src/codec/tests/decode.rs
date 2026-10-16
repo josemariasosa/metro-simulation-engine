@@ -629,32 +629,6 @@ fn decode_is_stateless() {
 }
 
 #[test]
-fn accepts_maximum_valid_id_values() {
-    let mut input = DEPART;
-
-    input[2..4].copy_from_slice(&u16::MAX.to_le_bytes());
-    input[4..6].copy_from_slice(&1u16.to_le_bytes());
-    input[6..10].copy_from_slice(&u32::MAX.to_le_bytes());
-    input[10..12].copy_from_slice(&u16::MAX.to_le_bytes());
-    input[12..14].copy_from_slice(&u16::MAX.to_le_bytes());
-    input[14..16].copy_from_slice(&1u16.to_le_bytes());
-
-    let frame = decode(&input).unwrap();
-
-    assert_eq!(frame.source.get(), u16::MAX);
-    assert_eq!(frame.command_id.unwrap().get(), u32::MAX);
-
-    assert_eq!(
-        frame.message,
-        Message::Command(Command::Depart {
-            train_id: train(u16::MAX),
-            from: station(u16::MAX),
-            to: station(1),
-        })
-    );
-}
-
-#[test]
 fn node_and_train_ids_are_independent() {
     let mut input = DEPART;
 

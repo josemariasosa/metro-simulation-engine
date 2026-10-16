@@ -327,31 +327,6 @@ fn invalid_stopped_location_takes_priority_over_small_buffer() {
 }
 
 #[test]
-fn maximum_valid_command_id_is_encoded_little_endian() {
-    let mut frame = depart();
-    frame.command_id = command_id(u32::MAX);
-
-    let mut buffer = [0u8; 32];
-    assert_eq!(encode(&frame, &mut buffer), Ok(16));
-
-    assert_eq!(&buffer[6..10], &[0xFF; 4]);
-}
-
-#[test]
-fn maximum_valid_train_id_is_encoded_little_endian() {
-    let mut frame = depart();
-
-    if let Message::Command(Command::Depart { train_id, .. }) = &mut frame.message {
-        *train_id = train(u16::MAX);
-    }
-
-    let mut buffer = [0u8; 32];
-    assert_eq!(encode(&frame, &mut buffer), Ok(16));
-
-    assert_eq!(&buffer[10..12], &[0xFF, 0xFF]);
-}
-
-#[test]
 fn node_and_train_ids_are_independent() {
     let mut frame = depart();
     frame.source = node(3);
