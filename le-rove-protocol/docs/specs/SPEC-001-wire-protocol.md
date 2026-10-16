@@ -1,5 +1,7 @@
 # SPEC-001 — Wire Protocol & Message Contracts
 
+**Status: Implemented 💚**
+
 ## 1. Status and scope
 
 **Status: proposed; complete draft for review. No codec or firmware implementation is authorized by this document.**
