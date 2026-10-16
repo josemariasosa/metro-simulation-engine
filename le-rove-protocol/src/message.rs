@@ -11,11 +11,11 @@ impl Message {
     pub const fn kind(&self) -> MessageKind {
         match self {
             Message::Command(Command::Depart { .. }) => MessageKind::Depart,
-
             Message::Command(Command::EmergencyStop { .. }) => MessageKind::EmergencyStop,
-
-            // Las otras cuatro variantes vendrán después.
-            _ => todo!(),
+            Message::CommandResult(CommandResult::Accepted { .. }) => MessageKind::Accepted,
+            Message::CommandResult(CommandResult::Rejected { .. }) => MessageKind::Rejected,
+            Message::Event(Event::Departed { .. }) => MessageKind::Departed,
+            Message::Event(Event::Stopped { .. }) => MessageKind::Stopped,
         }
     }
 }
@@ -56,10 +56,11 @@ pub enum Command {
     },
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
-    Depart,
-    EmergencyStop,
+    Depart = 0x01,
+    EmergencyStop = 0x02,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,28 +90,31 @@ pub enum Event {
     },
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmergencyReason {
-    OperatorRequest,
-    BrainSafetyDecision,
+    OperatorRequest = 0x01,
+    BrainSafetyDecision = 0x02,
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RejectionReason {
-    InvalidState,
-    LocationMismatch,
-    UnknownStation,
-    UnsupportedMovement,
-    SafetyInhibit,
-    UnableToExecute,
+    InvalidState = 0x01,
+    LocationMismatch = 0x02,
+    UnknownStation = 0x03,
+    UnsupportedMovement = 0x04,
+    SafetyInhibit = 0x05,
+    UnableToExecute = 0x06,
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
-    EmergencyCommand,
-    Obstacle,
-    LocalStop,
-    Unspecified,
+    EmergencyCommand = 0x01,
+    Obstacle = 0x02,
+    LocalStop = 0x03,
+    Unspecified = 0x04,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,4 +122,21 @@ pub enum Location {
     Unknown,
     AtStation(StationId),
     OnSegment { from: StationId, to: StationId },
+}
+
+impl Location {
+    pub const fn kind(&self) -> LocationKind {
+        match self {
+            Location::Unknown => LocationKind::Unknown,
+            Location::AtStation(_) => LocationKind::AtStation,
+            Location::OnSegment { .. } => LocationKind::OnSegment,
+        }
+    }
+}
+
+#[repr(u8)]
+pub enum LocationKind {
+    Unknown = 0x00,
+    AtStation = 0x01,
+    OnSegment = 0x02,
 }
