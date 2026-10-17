@@ -1,8 +1,5 @@
-use crate::codec::Field;
-use crate::{
-    DecodeError,
-    identity::{StationId, TrainId},
-};
+use crate::codec::{DecodeError, Field};
+use crate::identity::{StationId, TrainId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Message {

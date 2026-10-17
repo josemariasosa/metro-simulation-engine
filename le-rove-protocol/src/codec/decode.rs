@@ -1,9 +1,8 @@
-use crate::EmergencyReason;
 use crate::frame::{Frame, valid_command_id};
 use crate::identity::{CommandId, NodeId, StationId, TrainId};
 use crate::message::{
-    Command, CommandKind, CommandResult, Event, Location, LocationKind, Message, MessageKind,
-    RejectionReason, StopReason,
+    Command, CommandKind, CommandResult, EmergencyReason, Event, Location, LocationKind, Message,
+    MessageKind, RejectionReason, StopReason,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

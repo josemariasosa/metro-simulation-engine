@@ -8,9 +8,13 @@
 //! Host tests emulate the Train API usage; the separate embedded library build
 //! verifies no_std compatibility. No motor, sensor, or transport behavior is modeled.
 use le_rove_protocol::{
-    Command, CommandId, CommandKind, CommandResult, EmergencyReason, EncodeError, Event, Frame,
-    Location, Message, MessageKind, NodeId, RejectionReason, StationId, StopReason, TrainId,
-    decode, encode,
+    codec::{EncodeError, decode, encode},
+    frame::Frame,
+    identity::{CommandId, NodeId, StationId, TrainId},
+    message::{
+        Command, CommandKind, CommandResult, EmergencyReason, Event, Location, Message,
+        MessageKind, RejectionReason, StopReason,
+    },
 };
 
 fn brain_command(message: Message, id: u32) -> Frame {

@@ -4,11 +4,11 @@ mod roundtrip;
 
 use super::*;
 
-use crate::EmergencyReason;
 use crate::frame::Frame;
 use crate::identity::{CommandId, NodeId, StationId, TrainId};
 use crate::message::{
-    Command, CommandKind, CommandResult, Event, Location, Message, RejectionReason, StopReason,
+    Command, CommandKind, CommandResult, EmergencyReason, Event, Location, Message,
+    RejectionReason, StopReason,
 };
 
 const DEPART_ID: u32 = 0x01020304;

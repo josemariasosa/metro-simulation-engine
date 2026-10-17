@@ -1,8 +1,12 @@
 //! External-consumer API smoke tests; exhaustive wire validation lives in unit tests.
 use le_rove_protocol::{
-    Command, CommandId, CommandKind, CommandResult, DecodeError, EmergencyReason, EncodeError,
-    Event, Field, Frame, Location, Message, MessageKind, NodeId, RejectionReason, StationId,
-    StopReason, TrainId, decode, encode,
+    codec::{DecodeError, EncodeError, Field, decode, encode},
+    frame::Frame,
+    identity::{CommandId, NodeId, StationId, TrainId},
+    message::{
+        Command, CommandKind, CommandResult, EmergencyReason, Event, Location, Message,
+        MessageKind, RejectionReason, StopReason,
+    },
 };
 
 fn departure() -> Frame {
