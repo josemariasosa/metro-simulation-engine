@@ -179,7 +179,10 @@ fn terminal_contention_uses_numeric_id_in_both_storage_orders() {
 
         sim.step();
         moving(&sim, second_id, 1, 0, 0);
-        assert_eq!(sim.train(second_id).unwrap().direction(), Direction::Backward);
+        assert_eq!(
+            sim.train(second_id).unwrap().direction(),
+            Direction::Backward
+        );
     }
     assert_eq!(outcomes[0], outcomes[1]);
 }

@@ -136,7 +136,10 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
 
     assert_blocked_unchanged(&mut simulation, train_id);
 
-    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
+    assert_eq!(
+        simulation.train(train_id).unwrap().direction(),
+        Direction::Forward
+    );
 
     simulation
         .apply_command(TrainCommand::Accelerate {
@@ -155,7 +158,10 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
 
     simulation.step();
 
-    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
+    assert_eq!(
+        simulation.train(train_id).unwrap().direction(),
+        Direction::Forward
+    );
 
     assert_eq!(
         simulation.train(train_id).unwrap().state(),
@@ -173,7 +179,10 @@ fn blocked_terminal_reversal_preserves_direction_until_fresh_command() {
         .unwrap();
 
     assert_eq!(simulation.elapsed_seconds, 2);
-    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
+    assert_eq!(
+        simulation.train(train_id).unwrap().direction(),
+        Direction::Backward
+    );
     assert_eq!(simulation.train(train_id).unwrap().velocity(), 1);
 
     assert_eq!(

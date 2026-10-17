@@ -134,7 +134,10 @@ fn opposite_direction_resources_do_not_block_manual_departure() {
                 elapsed_seconds: 0,
             }
         );
-        assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
+        assert_eq!(
+            simulation.train(train_id).unwrap().direction(),
+            Direction::Forward
+        );
         assert_eq!(simulation.train(train_id).unwrap().velocity(), 1);
         ResourceView::derive(simulation.trains());
     }
@@ -369,11 +372,17 @@ fn arrival_at_terminal_keeps_direction_until_next_departure_is_committed() {
 
     arrived(&simulation, train_id, 1, F);
 
-    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
+    assert_eq!(
+        simulation.train(train_id).unwrap().direction(),
+        Direction::Forward
+    );
 
     command(&mut simulation, train_id, Ok(()));
 
-    assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
+    assert_eq!(
+        simulation.train(train_id).unwrap().direction(),
+        Direction::Backward
+    );
 
     assert_eq!(
         simulation.train(train_id).unwrap().state(),

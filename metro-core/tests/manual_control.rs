@@ -410,7 +410,10 @@ fn manual_train_waits_ready_at_endpoint_without_reversing() {
     for elapsed_seconds in 4..=10 {
         simulation.step();
         assert_eq!(simulation.elapsed_seconds, elapsed_seconds);
-        assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Forward);
+        assert_eq!(
+            simulation.train(train_id).unwrap().direction(),
+            Direction::Forward
+        );
         assert_eq!(
             simulation.train(train_id).unwrap().state(),
             TrainState::AtStation {
@@ -599,7 +602,10 @@ fn duplicate_acceleration_preserves_zero_and_advanced_traversal() {
                 elapsed_seconds,
             }
         );
-        assert_eq!(simulation.train(train_id).unwrap().direction(), Direction::Backward);
+        assert_eq!(
+            simulation.train(train_id).unwrap().direction(),
+            Direction::Backward
+        );
         assert_eq!(
             Simulation::snapshot_train_by_id(&simulation.snapshot(), train_id).velocity,
             1
