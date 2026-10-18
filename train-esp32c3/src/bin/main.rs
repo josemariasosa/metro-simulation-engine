@@ -14,6 +14,12 @@ use esp_hal::{
 };
 use log::info;
 
+use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::spi::master::{Config as SpiConfig, Spi};
+use esp_hal::{spi::Mode, time::Rate};
+
+use embedded_hal::spi::SpiBus;
+
 use esp_backtrace as _;
 
 use le_rove_protocol::{
@@ -78,7 +84,92 @@ fn main() -> ! {
 
     // ---
 
-    let _peripherals = esp_hal::init(config);
+    let peripherals = esp_hal::init(config);
+
+    let mut csn = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
+
+    let mut ce = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());
+
+    info!("RF control pins initialized");
+
+    let spi_config = SpiConfig::default()
+        .with_frequency(Rate::from_khz(500))
+        .with_mode(Mode::_0);
+
+    let mut spi = Spi::new(peripherals.SPI2, spi_config)
+        .unwrap()
+        .with_sck(peripherals.GPIO8)
+        .with_mosi(peripherals.GPIO10)
+        .with_miso(peripherals.GPIO21);
+
+    info!("SPI initialized");
+
+    let mut buffer = [0x00, 0xFF];
+
+    // Comenzamos la transacción
+    csn.set_low();
+
+    // Escribimos y leemos simultáneamente
+    spi.transfer_in_place(&mut buffer).unwrap();
+
+    // Terminamos la transacción
+    csn.set_high();
+
+    info!("SPI STATUS: 0x{:02X}", buffer[0]);
+    info!("RF CONFIG: 0x{:02X}", buffer[1]);
+
+    // RF_CH register address
+    const RF_CH: u8 = 0x05;
+
+    // nRF24L01+ SPI commands
+    const R_REGISTER: u8 = 0x00;
+    const W_REGISTER: u8 = 0x20;
+
+    // 1. Read original channel
+    let mut read = [R_REGISTER | RF_CH, 0xFF];
+
+    csn.set_low();
+    spi.transfer_in_place(&mut read).unwrap();
+    csn.set_high();
+
+    let original_channel = read[1];
+    info!("Original RF_CH: 0x{:02X}", original_channel);
+
+    // 2. Write channel 50
+    let mut write = [W_REGISTER | RF_CH, 0x32];
+
+    csn.set_low();
+    spi.transfer_in_place(&mut write).unwrap();
+    csn.set_high();
+
+    // 3. Read back
+    let mut verify = [R_REGISTER | RF_CH, 0xFF];
+
+    csn.set_low();
+    spi.transfer_in_place(&mut verify).unwrap();
+    csn.set_high();
+
+    info!("Modified RF_CH: 0x{:02X}", verify[1]);
+
+    // 4. Restore original channel
+    let mut restore = [W_REGISTER | RF_CH, original_channel];
+
+    csn.set_low();
+    spi.transfer_in_place(&mut restore).unwrap();
+    csn.set_high();
+
+    // 5. Verify restoration
+    let mut restored = [R_REGISTER | RF_CH, 0xFF];
+
+    csn.set_low();
+    spi.transfer_in_place(&mut restored).unwrap();
+    csn.set_high();
+
+    assert_eq!(verify[1], 0x32);
+    assert_eq!(restored[1], original_channel);
+
+    info!("RF_CH restored: 0x{:02X}", restored[1]);
+    info!("nRF24L01+ SPI read/write: PASS");
 
     info!("Train ESP32-C3 initialized");
 
