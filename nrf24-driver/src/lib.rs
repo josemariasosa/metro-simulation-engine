@@ -6,6 +6,13 @@ const R_REGISTER: u8 = 0x00;
 const REGISTER_MASK: u8 = 0x1F;
 
 const W_REGISTER: u8 = 0x20;
+const W_TX_PAYLOAD: u8 = 0xA0;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PayloadError<E> {
+    InvalidLength,
+    Spi(E),
+}
 
 pub struct Nrf24<SPI> {
     spi: SPI,
@@ -33,6 +40,23 @@ where
         let mut buffer = [command, value];
 
         self.spi.transfer_in_place(&mut buffer)?;
+
+        Ok(())
+    }
+
+    pub fn write_payload(&mut self, payload: &[u8]) -> Result<(), PayloadError<SPI::Error>> {
+        if payload.is_empty() || payload.len() > 32 {
+            return Err(PayloadError::InvalidLength);
+        }
+
+        let mut buffer = [0u8; 33];
+
+        buffer[0] = W_TX_PAYLOAD;
+        buffer[1..1 + payload.len()].copy_from_slice(payload);
+
+        self.spi
+            .write(&buffer[..1 + payload.len()])
+            .map_err(PayloadError::Spi)?;
 
         Ok(())
     }
@@ -86,5 +110,50 @@ mod tests {
 
         let mut spi = radio.release();
         spi.done();
+    }
+
+    #[test]
+    fn write_tx_payload() {
+        let payload = [
+            0x01, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let expected = [
+            0xA0, 0x01, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x04,
+            0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let expectations = [
+            Transaction::transaction_start(),
+            Transaction::write_vec(expected.to_vec()),
+            Transaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let mut radio = Nrf24::new(spi);
+
+        radio.write_payload(&payload).unwrap();
+
+        let mut spi = radio.release();
+        spi.done();
+    }
+
+    #[test]
+    fn reject_invalid_payload_lengths() {
+        for size in [0, 33] {
+            // No SPI transactions should occur.
+            let spi = SpiMock::new(&[]);
+            let mut radio = Nrf24::new(spi);
+
+            let payload = [0u8; 33];
+
+            let result = radio.write_payload(&payload[..size]);
+
+            assert!(matches!(result, Err(PayloadError::InvalidLength)));
+
+            let mut spi = radio.release();
+            spi.done();
+        }
     }
 }

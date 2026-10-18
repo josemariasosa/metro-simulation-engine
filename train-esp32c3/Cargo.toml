@@ -12,6 +12,7 @@ path = "./src/bin/main.rs"
 esp-hal = { version = "~1.2.2", features = ["esp32c3", "log-04"] }
 
 embedded-hal = "1.0"
+embedded-hal-bus = "0.3"
 
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c3", "log-04"] }
 log = "0.4.27"
@@ -25,6 +26,7 @@ esp-backtrace = { version = "0.20.0", features = [
 esp-println = { version = "0.18.0", features = ["esp32c3", "log-04"] }
 
 le-rove-protocol = { path = "../le-rove-protocol" }
+nrf24-driver = { path = "../nrf24-driver" }
 
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
