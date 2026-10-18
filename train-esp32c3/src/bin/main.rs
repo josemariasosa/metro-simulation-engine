@@ -7,23 +7,21 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+use embedded_hal::spi::SpiDevice;
+use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
+    gpio::{Level, Output, OutputConfig},
     main,
-    time::{Duration, Instant},
+    spi::{
+        master::{Config as SpiConfig, Spi},
+        Mode,
+    },
+    time::{Duration, Instant, Rate},
 };
 use log::info;
-
-use embedded_hal_bus::spi::ExclusiveDevice;
 use nrf24_driver::Nrf24;
-
-use esp_hal::gpio::{Level, Output, OutputConfig};
-use esp_hal::spi::master::{Config as SpiConfig, Spi};
-use esp_hal::{spi::Mode, time::Rate};
-
-use embedded_hal::spi::SpiBus;
-
-use esp_backtrace as _;
 
 use le_rove_protocol::{
     codec::{decode, encode},
@@ -32,11 +30,79 @@ use le_rove_protocol::{
     message::{Event, Location, Message, StopReason},
 };
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-fn protocol_self_test() {
+// nRF24L01+ registers
+const CONFIG: u8 = 0x00;
+const EN_AA: u8 = 0x01;
+const RF_CH: u8 = 0x05;
+const RF_SETUP: u8 = 0x06;
+const STATUS: u8 = 0x07;
+const TX_ADDR: u8 = 0x10;
+const FIFO_STATUS: u8 = 0x17;
+
+// Register bits
+const PWR_UP: u8 = 1 << 1;
+const PRIM_RX: u8 = 1 << 0;
+const RX_DR: u8 = 1 << 6;
+const TX_DS: u8 = 1 << 5;
+const MAX_RT: u8 = 1 << 4;
+const TX_EMPTY: u8 = 1 << 4;
+
+// Lab configuration
+const CHANNEL: u8 = 50;
+const TX_ADDRESS: [u8; 5] = [0xE7; 5];
+const RF_SETUP_1MBPS_MIN_POWER: u8 = 0x00;
+
+fn delay(duration: Duration) {
+    let start = Instant::now();
+    while start.elapsed() < duration {}
+}
+
+fn configure_radio<SPI>(radio: &mut Nrf24<SPI>)
+where
+    SPI: SpiDevice,
+    SPI::Error: core::fmt::Debug,
+{
+    // Disable Auto ACK: no receiver is available yet.
+    radio.write_register(EN_AA, 0x00).unwrap();
+    assert_eq!(radio.read_register(EN_AA).unwrap(), 0x00);
+
+    // Channel 50 = 2450 MHz.
+    radio.write_register(RF_CH, CHANNEL).unwrap();
+    assert_eq!(radio.read_register(RF_CH).unwrap(), CHANNEL);
+
+    // 1 Mbps, minimum transceiver output power.
+    radio
+        .write_register(RF_SETUP, RF_SETUP_1MBPS_MIN_POWER)
+        .unwrap();
+    assert_eq!(
+        radio.read_register(RF_SETUP).unwrap(),
+        RF_SETUP_1MBPS_MIN_POWER
+    );
+
+    // Set and verify the radio destination address.
+    radio.write_register_bytes(TX_ADDR, &TX_ADDRESS).unwrap();
+
+    let mut address = [0u8; 5];
+    radio.read_register_bytes(TX_ADDR, &mut address).unwrap();
+    assert_eq!(address, TX_ADDRESS);
+
+    // Power up in PTX mode.
+    let original = radio.read_register(CONFIG).unwrap();
+    let tx_config = (original | PWR_UP) & !PRIM_RX;
+
+    radio.write_register(CONFIG, tx_config).unwrap();
+    assert_eq!(radio.read_register(CONFIG).unwrap(), tx_config);
+
+    // Allow the transceiver to settle after PWR_UP.
+    delay(Duration::from_millis(2));
+
+    info!("RF configured: channel={}, PTX, 1Mbps", CHANNEL);
+}
+
+fn protocol_self_test() -> ([u8; 32], usize) {
+    // SPEC-001 fixture; not a real observed train event.
     let original = Frame {
         source: NodeId::new(2).unwrap(),
         destination: NodeId::new(1).unwrap(),
@@ -49,18 +115,13 @@ fn protocol_self_test() {
     };
 
     let mut buffer = [0u8; 32];
-
     let written = encode(&original, &mut buffer).unwrap();
 
-    info!("Encoded {} bytes", written);
-    info!("Payload: {:02X?}", &buffer[..written]);
-
+    // Round-trip verification.
     let recovered = decode(&buffer[..written]).unwrap();
-
     assert_eq!(original, recovered);
 
-    info!("SPEC-001 encode/decode: PASS");
-
+    // Independent SPEC-001 fixed vector.
     const EXPECTED: [u8; 18] = [
         0x01, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00,
         0x00, 0x00, 0x00,
@@ -68,158 +129,109 @@ fn protocol_self_test() {
 
     assert_eq!(&buffer[..written], &EXPECTED);
 
-    info!("SPEC-001 equal expected coded: PASS");
+    info!("SPEC-001 encode/decode: PASS");
+    info!("Payload: {:02X?}", &buffer[..written]);
+
+    (buffer, written)
+}
+
+fn transmit<SPI>(radio: &mut Nrf24<SPI>, ce: &mut Output<'_>, payload: &[u8])
+where
+    SPI: SpiDevice,
+    SPI::Error: core::fmt::Debug,
+{
+    // Start with a clean TX FIFO.
+    radio.flush_tx().unwrap();
+
+    let fifo = radio.read_register(FIFO_STATUS).unwrap();
+    assert_ne!(fifo & TX_EMPTY, 0);
+
+    // Clear stale interrupt flags (write-one-to-clear).
+    radio
+        .write_register(STATUS, RX_DR | TX_DS | MAX_RT)
+        .unwrap();
+
+    // Load exactly one payload.
+    radio.write_payload(payload).unwrap();
+
+    let fifo = radio.read_register(FIFO_STATUS).unwrap();
+    assert_eq!(fifo & TX_EMPTY, 0);
+
+    info!("TX FIFO loaded: {} bytes", payload.len());
+
+    // Trigger TX with a CE pulse.
+    ce.set_high();
+    delay(Duration::from_micros(20));
+    ce.set_low();
+
+    // Allow the radio to complete the packet.
+    delay(Duration::from_millis(2));
+
+    let status = radio.read_register(STATUS).unwrap();
+    let tx_complete = status & TX_DS != 0;
+    let max_retries = status & MAX_RT != 0;
+
+    info!("STATUS after TX: 0x{:02X}", status);
+    info!("TX_DS: {}", tx_complete);
+    info!("MAX_RT: {}", max_retries);
+
+    // No ACK required in this experiment.
+    assert!(tx_complete);
+    assert!(!max_retries);
+
+    // Confirm the payload has left the TX FIFO.
+    let fifo = radio.read_register(FIFO_STATUS).unwrap();
+    assert_ne!(fifo & TX_EMPTY, 0);
+
+    // Clear TX completion flag.
+    radio.write_register(STATUS, TX_DS).unwrap();
+
+    info!("RF transmission completed: PASS");
 }
 
 #[allow(
     clippy::large_stack_frames,
-    reason = "it's not unusual to allocate larger buffers etc. in main"
+    reason = "Embedded initialization and fixed-size buffers"
 )]
 #[main]
 fn main() -> ! {
-    // generator version: 1.4.0
-    // generator parameters: -o esp32c3 -o esp32c3-mini-1 -o log -o esp-backtrace -o stable-aarch64-apple-darwin
-
     esp_println::logger::init_logger_from_env();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    // let peripherals = esp_hal::init(config);
-
-    // ---
 
     let peripherals = esp_hal::init(config);
 
-    let mut csn = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
+    // Radio control pins
+    let csn = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
 
     let mut ce = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());
 
-    info!("RF control pins initialized");
-
+    // SPI bus
     let spi_config = SpiConfig::default()
         .with_frequency(Rate::from_khz(500))
         .with_mode(Mode::_0);
 
-    let mut spi = Spi::new(peripherals.SPI2, spi_config)
+    let spi = Spi::new(peripherals.SPI2, spi_config)
         .unwrap()
         .with_sck(peripherals.GPIO8)
         .with_mosi(peripherals.GPIO10)
         .with_miso(peripherals.GPIO21);
 
-    info!("SPI initialized");
-
+    // SPI device and portable RF driver
     let device = ExclusiveDevice::new_no_delay(spi, csn).unwrap();
-
     let mut radio = Nrf24::new(device);
-
-    info!("nRF24 driver initialized");
-
-    let channel = radio.read_register(0x05).unwrap();
-
-    info!("RF_CH via nrf24-driver: 0x{:02X}", channel);
-
-    radio.write_register(0x05, 0x32).unwrap();
-
-    let modified = radio.read_register(0x05).unwrap();
-    assert_eq!(modified, 0x32);
-
-    radio.write_register(0x05, channel).unwrap();
-
-    let restored = radio.read_register(0x05).unwrap();
-    assert_eq!(restored, channel);
-
-    info!("RF_CH write/read/restore: PASS");
-
-    // let mut buffer = [0x00, 0xFF];
-
-    // // Comenzamos la transacción
-    // csn.set_low();
-
-    // // Escribimos y leemos simultáneamente
-    // spi.transfer_in_place(&mut buffer).unwrap();
-
-    // // Terminamos la transacción
-    // csn.set_high();
-
-    // info!("SPI STATUS: 0x{:02X}", buffer[0]);
-    // info!("RF CONFIG: 0x{:02X}", buffer[1]);
-
-    // // RF_CH register address
-    // const RF_CH: u8 = 0x05;
-
-    // // nRF24L01+ SPI commands
-    // const R_REGISTER: u8 = 0x00;
-    // const W_REGISTER: u8 = 0x20;
-
-    // // 1. Read original channel
-    // let mut read = [R_REGISTER | RF_CH, 0xFF];
-
-    // csn.set_low();
-    // spi.transfer_in_place(&mut read).unwrap();
-    // csn.set_high();
-
-    // let original_channel = read[1];
-    // info!("Original RF_CH: 0x{:02X}", original_channel);
-
-    // // 2. Write channel 50
-    // let mut write = [W_REGISTER | RF_CH, 0x32];
-
-    // csn.set_low();
-    // spi.transfer_in_place(&mut write).unwrap();
-    // csn.set_high();
-
-    // // 3. Read back
-    // let mut verify = [R_REGISTER | RF_CH, 0xFF];
-
-    // csn.set_low();
-    // spi.transfer_in_place(&mut verify).unwrap();
-    // csn.set_high();
-
-    // info!("Modified RF_CH: 0x{:02X}", verify[1]);
-
-    // // 4. Restore original channel
-    // let mut restore = [W_REGISTER | RF_CH, original_channel];
-
-    // csn.set_low();
-    // spi.transfer_in_place(&mut restore).unwrap();
-    // csn.set_high();
-
-    // // 5. Verify restoration
-    // let mut restored = [R_REGISTER | RF_CH, 0xFF];
-
-    // csn.set_low();
-    // spi.transfer_in_place(&mut restored).unwrap();
-    // csn.set_high();
-
-    // assert_eq!(verify[1], 0x32);
-    // assert_eq!(restored[1], original_channel);
-
-    // info!("RF_CH restored: 0x{:02X}", restored[1]);
-    // info!("nRF24L01+ SPI read/write: PASS");
 
     info!("Train ESP32-C3 initialized");
 
-    protocol_self_test();
-    // ---
+    configure_radio(&mut radio);
 
-    // // The following pins are used to bootstrap the chip. They are available
-    // // for use, but check the datasheet of the module for more information on them.
-    // // - GPIO2
-    // // - GPIO8
-    // // - GPIO9
-    // // These GPIO pins are in use by some feature of the module and should not be used.
-    // let _gpio11 = peripherals.GPIO11;
-    // let _gpio12 = peripherals.GPIO12;
-    // let _gpio13 = peripherals.GPIO13;
-    // let _gpio14 = peripherals.GPIO14;
-    // let _gpio15 = peripherals.GPIO15;
-    // let _gpio16 = peripherals.GPIO16;
-    // let _gpio17 = peripherals.GPIO17;
+    let (buffer, written) = protocol_self_test();
+
+    transmit(&mut radio, &mut ce, &buffer[..written]);
+
+    info!("Transmission completed");
 
     loop {
-        info!("Hello world!");
-        let delay_start = Instant::now();
-        while delay_start.elapsed() < Duration::from_millis(500) {}
+        delay(Duration::from_millis(500));
     }
-
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.2.2/examples
 }

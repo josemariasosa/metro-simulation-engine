@@ -1,6 +1,6 @@
 #![no_std]
 
-use embedded_hal::spi::SpiDevice;
+use embedded_hal::spi::{Operation, SpiDevice};
 
 const R_REGISTER: u8 = 0x00;
 const REGISTER_MASK: u8 = 0x1F;
@@ -8,8 +8,16 @@ const REGISTER_MASK: u8 = 0x1F;
 const W_REGISTER: u8 = 0x20;
 const W_TX_PAYLOAD: u8 = 0xA0;
 
+const FLUSH_TX: u8 = 0xE1;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum PayloadError<E> {
+    InvalidLength,
+    Spi(E),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RegisterError<E> {
     InvalidLength,
     Spi(E),
 }
@@ -44,6 +52,45 @@ where
         Ok(())
     }
 
+    pub fn read_register_bytes(
+        &mut self,
+        register: u8,
+        output: &mut [u8],
+    ) -> Result<(), RegisterError<SPI::Error>> {
+        if output.is_empty() || output.len() > 5 {
+            return Err(RegisterError::InvalidLength);
+        }
+
+        let command = [R_REGISTER | (register & REGISTER_MASK)];
+
+        self.spi
+            .transaction(&mut [Operation::Write(&command), Operation::Read(output)])
+            .map_err(RegisterError::Spi)?;
+
+        Ok(())
+    }
+
+    pub fn write_register_bytes(
+        &mut self,
+        register: u8,
+        values: &[u8],
+    ) -> Result<(), RegisterError<SPI::Error>> {
+        if values.is_empty() || values.len() > 5 {
+            return Err(RegisterError::InvalidLength);
+        }
+
+        let mut buffer = [0u8; 6];
+
+        buffer[0] = W_REGISTER | (register & REGISTER_MASK);
+        buffer[1..1 + values.len()].copy_from_slice(values);
+
+        self.spi
+            .write(&buffer[..1 + values.len()])
+            .map_err(RegisterError::Spi)?;
+
+        Ok(())
+    }
+
     pub fn write_payload(&mut self, payload: &[u8]) -> Result<(), PayloadError<SPI::Error>> {
         if payload.is_empty() || payload.len() > 32 {
             return Err(PayloadError::InvalidLength);
@@ -59,6 +106,10 @@ where
             .map_err(PayloadError::Spi)?;
 
         Ok(())
+    }
+
+    pub fn flush_tx(&mut self) -> Result<(), SPI::Error> {
+        self.spi.write(&[FLUSH_TX])
     }
 
     pub fn release(self) -> SPI {
@@ -155,5 +206,64 @@ mod tests {
             let mut spi = radio.release();
             spi.done();
         }
+    }
+
+    #[test]
+    fn flush_tx_fifo() {
+        let expectations = [
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xE1]),
+            Transaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let mut radio = Nrf24::new(spi);
+
+        radio.flush_tx().unwrap();
+
+        let mut spi = radio.release();
+        spi.done();
+    }
+
+    #[test]
+    fn write_tx_address() {
+        let expectations = [
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![
+                0x30, // W_REGISTER | TX_ADDR (0x10)
+                0xE7, 0xE7, 0xE7, 0xE7, 0xE7,
+            ]),
+            Transaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let mut radio = Nrf24::new(spi);
+
+        radio.write_register_bytes(0x10, &[0xE7; 5]).unwrap();
+
+        let mut spi = radio.release();
+        spi.done();
+    }
+
+    #[test]
+    fn read_tx_address() {
+        let expectations = [
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x10]),
+            Transaction::read_vec(vec![0xE7; 5]),
+            Transaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let mut radio = Nrf24::new(spi);
+
+        let mut address = [0u8; 5];
+
+        radio.read_register_bytes(0x10, &mut address).unwrap();
+
+        assert_eq!(address, [0xE7; 5]);
+
+        let mut spi = radio.release();
+        spi.done();
     }
 }
