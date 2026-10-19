@@ -10,6 +10,10 @@ const W_TX_PAYLOAD: u8 = 0xA0;
 
 const FLUSH_TX: u8 = 0xE1;
 
+// **********
+// * Errors *
+// **********
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum PayloadError<E> {
     InvalidLength,
@@ -21,6 +25,35 @@ pub enum RegisterError<E> {
     InvalidLength,
     Spi(E),
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigError {
+    InvalidChannel,
+}
+
+// *****************
+// * Configuration *
+// *****************
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxConfig {
+    channel: u8,
+    address: [u8; 5],
+}
+
+impl TxConfig {
+    pub fn new(channel: u8, address: [u8; 5]) -> Result<Self, ConfigError> {
+        if channel > 125 {
+            return Err(ConfigError::InvalidChannel);
+        }
+
+        Ok(Self { channel, address })
+    }
+}
+
+// **********
+// * Driver *
+// **********
 
 pub struct Nrf24<SPI> {
     spi: SPI,
@@ -265,5 +298,19 @@ mod tests {
 
         let mut spi = radio.release();
         spi.done();
+    }
+
+    #[test]
+    fn accept_valid_tx_config() {
+        let config = TxConfig::new(50, [0xE7; 5]);
+
+        assert!(config.is_ok());
+    }
+
+    #[test]
+    fn reject_invalid_tx_channel() {
+        let config = TxConfig::new(126, [0xE7; 5]);
+
+        assert_eq!(config, Err(ConfigError::InvalidChannel));
     }
 }
