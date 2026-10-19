@@ -1,5 +1,7 @@
 #![no_std]
 
+use embedded_hal::delay::DelayNs;
+use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::{Operation, SpiDevice};
 
 const R_REGISTER: u8 = 0x00;
@@ -46,6 +48,16 @@ pub enum ConfigureError<E> {
     Register(RegisterError<E>),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum TxError<SpiError, PinError> {
+    Spi(SpiError),
+    Pin(PinError),
+    Payload(PayloadError<SpiError>),
+    Timeout,
+    MaxRetries,
+    FifoNotEmpty,
+}
+
 // *****************
 // * Configuration *
 // *****************
@@ -70,16 +82,18 @@ impl TxConfig {
 // * Driver *
 // **********
 
-pub struct Nrf24<SPI> {
+pub struct Nrf24<SPI, CE> {
     spi: SPI,
+    ce: CE,
 }
 
-impl<SPI> Nrf24<SPI>
+impl<SPI, CE> Nrf24<SPI, CE>
 where
     SPI: SpiDevice,
+    CE: OutputPin,
 {
-    pub fn new(spi: SPI) -> Self {
-        Self { spi }
+    pub fn new(spi: SPI, ce: CE) -> Self {
+        Self { spi, ce }
     }
 
     pub fn configure_tx(&mut self, config: &TxConfig) -> Result<(), ConfigureError<SPI::Error>> {
@@ -106,6 +120,14 @@ where
 
         self.write_register(CONFIG, tx_config)
             .map_err(ConfigureError::Spi)?;
+
+        Ok(())
+    }
+
+    pub fn pulse_ce<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), CE::Error> {
+        self.ce.set_high()?;
+        delay.delay_us(20);
+        self.ce.set_low()?;
 
         Ok(())
     }
@@ -188,8 +210,62 @@ where
         self.spi.write(&[FLUSH_TX])
     }
 
-    pub fn release(self) -> SPI {
-        self.spi
+    pub fn release(self) -> (SPI, CE) {
+        (self.spi, self.ce)
+    }
+
+    pub fn transmit<D: DelayNs>(
+        &mut self,
+        payload: &[u8],
+        delay: &mut D,
+    ) -> Result<(), TxError<SPI::Error, CE::Error>> {
+        const STATUS: u8 = 0x07;
+        const FIFO_STATUS: u8 = 0x17;
+
+        const RX_DR: u8 = 1 << 6;
+        const TX_DS: u8 = 1 << 5;
+        const MAX_RT: u8 = 1 << 4;
+        const TX_EMPTY: u8 = 1 << 4;
+
+        // 1. Start with a clean TX FIFO.
+        self.flush_tx().map_err(TxError::Spi)?;
+
+        // 2. Clear previous interrupt flags.
+        self.write_register(STATUS, RX_DR | TX_DS | MAX_RT)
+            .map_err(TxError::Spi)?;
+
+        // 3. Load exactly one payload.
+        self.write_payload(payload).map_err(TxError::Payload)?;
+
+        // 4. Trigger RF transmission.
+        self.pulse_ce(delay).map_err(TxError::Pin)?;
+
+        // 5. Poll STATUS with a bounded timeout.
+        for _ in 0..100 {
+            let status = self.read_register(STATUS).map_err(TxError::Spi)?;
+
+            if status & MAX_RT != 0 {
+                return Err(TxError::MaxRetries);
+            }
+
+            if status & TX_DS != 0 {
+                // 6. Confirm that the payload left the FIFO.
+                let fifo = self.read_register(FIFO_STATUS).map_err(TxError::Spi)?;
+
+                if fifo & TX_EMPTY == 0 {
+                    return Err(TxError::FifoNotEmpty);
+                }
+
+                // 7. Clear TX completion flag.
+                self.write_register(STATUS, TX_DS).map_err(TxError::Spi)?;
+
+                return Ok(());
+            }
+
+            delay.delay_us(100);
+        }
+
+        Err(TxError::Timeout)
     }
 }
 
@@ -201,6 +277,7 @@ mod tests {
 
     use super::*;
 
+    use embedded_hal_mock::eh1::digital::{Mock as PinMock, State, Transaction as PinTransaction};
     use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction};
 
     #[test]
@@ -212,14 +289,16 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         let channel = radio.read_register(0x05).unwrap();
 
         assert_eq!(channel, 0x02);
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
     }
 
     #[test]
@@ -231,12 +310,14 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         radio.write_register(0x05, 0x32).unwrap();
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
     }
 
     #[test]
@@ -258,12 +339,14 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         radio.write_payload(&payload).unwrap();
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
     }
 
     #[test]
@@ -271,7 +354,8 @@ mod tests {
         for size in [0, 33] {
             // No SPI transactions should occur.
             let spi = SpiMock::new(&[]);
-            let mut radio = Nrf24::new(spi);
+            let ce = PinMock::new(&[]);
+            let mut radio = Nrf24::new(spi, ce);
 
             let payload = [0u8; 33];
 
@@ -279,8 +363,9 @@ mod tests {
 
             assert!(matches!(result, Err(PayloadError::InvalidLength)));
 
-            let mut spi = radio.release();
+            let (mut spi, mut ce) = radio.release();
             spi.done();
+            ce.done();
         }
     }
 
@@ -293,12 +378,14 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         radio.flush_tx().unwrap();
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
     }
 
     #[test]
@@ -313,12 +400,14 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         radio.write_register_bytes(0x10, &[0xE7; 5]).unwrap();
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
     }
 
     #[test]
@@ -331,7 +420,8 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         let mut address = [0u8; 5];
 
@@ -339,8 +429,9 @@ mod tests {
 
         assert_eq!(address, [0xE7; 5]);
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
     }
 
     #[test]
@@ -387,13 +478,88 @@ mod tests {
         ];
 
         let spi = SpiMock::new(&expectations);
-        let mut radio = Nrf24::new(spi);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
 
         let config = TxConfig::new(50, [0xE7; 5]).unwrap();
 
         radio.configure_tx(&config).unwrap();
 
-        let mut spi = radio.release();
+        let (mut spi, mut ce) = radio.release();
         spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn pulse_ce_high_then_low() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let spi = SpiMock::new(&[]);
+
+        let ce_expectations = [
+            PinTransaction::set(State::High),
+            PinTransaction::set(State::Low),
+        ];
+
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        radio.pulse_ce(&mut delay).unwrap();
+
+        let (mut spi, mut ce) = radio.release();
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn transmit_success() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let expectations = [
+            // FLUSH_TX
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xE1]),
+            Transaction::transaction_end(),
+            // Clear STATUS flags.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x27, 0x70], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // Write three-byte payload.
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xA0, 0x01, 0x02, 0x03]),
+            Transaction::transaction_end(),
+            // STATUS: TX_DS = 1
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x07, 0xFF], vec![0x2E, 0x2E]),
+            Transaction::transaction_end(),
+            // FIFO_STATUS: TX_EMPTY = 1
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x17, 0xFF], vec![0x2E, 0x11]),
+            Transaction::transaction_end(),
+            // Clear TX_DS.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x27, 0x20], vec![0x2E, 0x00]),
+            Transaction::transaction_end(),
+        ];
+
+        let ce_expectations = [
+            PinTransaction::set(State::High),
+            PinTransaction::set(State::Low),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        radio.transmit(&[0x01, 0x02, 0x03], &mut delay).unwrap();
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
     }
 }
