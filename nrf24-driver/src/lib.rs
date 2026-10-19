@@ -1,3 +1,15 @@
+//! Minimal `no_std` driver for the nRF24L01+ transceiver.
+//!
+//! Built on `embedded-hal` SPI, GPIO, and delay traits.
+//!
+//! Currently supports PTX (transmit) mode only, with:
+//! - 1 Mbps data rate and minimum RF output power.
+//! - Auto ACK disabled.
+//! - Configurable RF channel and 5-byte TX address.
+//! - Verified initialization and fail-stop TX state management.
+//!
+//! RX support is not implemented yet.
+
 #![no_std]
 
 use embedded_hal::delay::DelayNs;
@@ -71,6 +83,10 @@ pub enum InitError<SpiError, PinError> {
 // * Configuration *
 // *****************
 
+/// Configuration for primary transmitter (PTX) mode.
+///
+/// Uses a fixed 1 Mbps data rate, minimum RF power,
+/// and disables automatic acknowledgments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TxConfig {
     channel: u8,
@@ -78,6 +94,12 @@ pub struct TxConfig {
 }
 
 impl TxConfig {
+    /// Creates a TX configuration.
+    ///
+    /// `channel` must be in the range 0..=125.
+    /// `address` is the 5-byte RF destination address.
+    ///
+    /// Returns `ConfigError::InvalidChannel` for an invalid channel.
     pub fn new(channel: u8, address: [u8; 5]) -> Result<Self, ConfigError> {
         if channel > 125 {
             return Err(ConfigError::InvalidChannel);
@@ -87,10 +109,16 @@ impl TxConfig {
     }
 }
 
+/// Operational state of the radio driver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioState {
+    /// Hardware has not completed verified initialization.
     Unknown,
+
+    /// TX initialization succeeded and transmissions are permitted.
     Ready,
+
+    /// A critical error occurred; further transmissions are blocked.
     Faulted,
 }
 
@@ -98,6 +126,12 @@ pub enum RadioState {
 // * Driver *
 // **********
 
+/// nRF24L01+ driver owning the SPI device and CE output pin.
+///
+/// Starts in `RadioState::Unknown`. Call `initialize_tx()`
+/// before attempting to transmit.
+///
+/// SPI chip-select (CSN) is managed by the supplied `SpiDevice`.
 pub struct Nrf24<SPI, CE> {
     spi: SPI,
     ce: CE,
@@ -109,6 +143,9 @@ where
     SPI: SpiDevice,
     CE: OutputPin,
 {
+    /// Creates a driver without accessing the hardware.
+    ///
+    /// The initial state is `RadioState::Unknown`.
     pub fn new(spi: SPI, ce: CE) -> Self {
         Self {
             spi,
@@ -117,6 +154,13 @@ where
         }
     }
 
+    /// Initializes and verifies the radio in PTX mode.
+    ///
+    /// Sets CE LOW, configures the radio, waits 2 ms for
+    /// stabilization, and verifies the critical TX registers.
+    ///
+    /// Transitions to `Ready` on success or `Faulted` on failure.
+    /// A faulted driver cannot be reinitialized implicitly.
     pub fn initialize_tx<D: DelayNs>(
         &mut self,
         config: &TxConfig,
@@ -138,7 +182,73 @@ where
         result
     }
 
-    pub fn pulse_ce<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), CE::Error> {
+    /// Transmits a single payload in PTX mode.
+    ///
+    /// Requires `RadioState::Ready` and a payload of 1..=32 bytes.
+    ///
+    /// Flushes the TX FIFO, clears interrupt flags, loads the payload,
+    /// pulses CE, and polls STATUS until completion or timeout.
+    ///
+    /// On success, verifies that the TX FIFO is empty and clears TX_DS.
+    ///
+    /// Critical failures transition the driver to `Faulted`.
+    /// Invalid payload length preserves the current state.
+    ///
+    /// TX completion does not guarantee reception by another device,
+    /// since automatic acknowledgments are disabled.
+    ///
+    /// The timeout is based on 100 STATUS polls with 100 us delays,
+    /// not an exact wall-clock deadline.
+    pub fn transmit<D: DelayNs>(
+        &mut self,
+        payload: &[u8],
+        delay: &mut D,
+    ) -> Result<(), TxError<SPI::Error, CE::Error>> {
+        if self.state != RadioState::Ready {
+            return Err(TxError::NotReady);
+        }
+
+        // Validate before any hardware interaction.
+        if payload.is_empty() || payload.len() > 32 {
+            return Err(TxError::Payload(PayloadError::InvalidLength));
+        }
+
+        let result = self.transmit_inner(payload, delay);
+
+        match &result {
+            Ok(()) => {}
+
+            // Invalid input: hardware was not accessed.
+            Err(TxError::Payload(PayloadError::InvalidLength)) => {}
+
+            // All other transmission failures are treated as critical.
+            Err(_) => {
+                self.state = RadioState::Faulted;
+            }
+        }
+
+        result
+    }
+
+    /// Consumes the driver and returns ownership of SPI and CE.
+    ///
+    /// Does not reset or power down the radio.
+    pub fn release(self) -> (SPI, CE) {
+        (self.spi, self.ce)
+    }
+
+    /// Returns the current operational state of the driver.
+    pub fn state(&self) -> RadioState {
+        self.state
+    }
+
+    /// Generates a 20 us CE pulse.
+    ///
+    /// If setting CE LOW fails, retries once as a best-effort
+    /// recovery and returns the original error.
+    ///
+    /// Does not guarantee the physical pin level after a GPIO error.
+    fn pulse_ce<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), CE::Error> {
         self.ce.set_high()?;
 
         delay.delay_us(20);
@@ -153,7 +263,8 @@ where
         Ok(())
     }
 
-    pub fn read_register(&mut self, register: u8) -> Result<u8, SPI::Error> {
+    /// Reads a single-byte register via SPI.
+    fn read_register(&mut self, register: u8) -> Result<u8, SPI::Error> {
         let command = R_REGISTER | (register & REGISTER_MASK);
         let mut buffer = [command, 0xFF];
 
@@ -162,7 +273,8 @@ where
         Ok(buffer[1])
     }
 
-    pub fn write_register(&mut self, register: u8, value: u8) -> Result<(), SPI::Error> {
+    /// Writes a single-byte register via SPI.
+    fn write_register(&mut self, register: u8, value: u8) -> Result<(), SPI::Error> {
         let command = W_REGISTER | (register & REGISTER_MASK);
         let mut buffer = [command, value];
 
@@ -171,7 +283,10 @@ where
         Ok(())
     }
 
-    pub fn read_register_bytes(
+    /// Reads 1..=5 bytes from a register into `output`.
+    ///
+    /// Returns `RegisterError::InvalidLength` for invalid lengths.
+    fn read_register_bytes(
         &mut self,
         register: u8,
         output: &mut [u8],
@@ -189,7 +304,10 @@ where
         Ok(())
     }
 
-    pub fn write_register_bytes(
+    /// Writes 1..=5 bytes to a register.
+    ///
+    /// Returns `RegisterError::InvalidLength` for invalid lengths.
+    fn write_register_bytes(
         &mut self,
         register: u8,
         values: &[u8],
@@ -210,7 +328,10 @@ where
         Ok(())
     }
 
-    pub fn write_payload(&mut self, payload: &[u8]) -> Result<(), PayloadError<SPI::Error>> {
+    /// Loads a payload of 1..=32 bytes into the TX FIFO.
+    ///
+    /// Does not trigger transmission.
+    fn write_payload(&mut self, payload: &[u8]) -> Result<(), PayloadError<SPI::Error>> {
         if payload.is_empty() || payload.len() > 32 {
             return Err(PayloadError::InvalidLength);
         }
@@ -227,42 +348,9 @@ where
         Ok(())
     }
 
-    pub fn transmit<D: DelayNs>(
-        &mut self,
-        payload: &[u8],
-        delay: &mut D,
-    ) -> Result<(), TxError<SPI::Error, CE::Error>> {
-        if self.state != RadioState::Ready {
-            return Err(TxError::NotReady);
-        }
-
-        let result = self.transmit_inner(payload, delay);
-
-        match &result {
-            Ok(()) => {}
-
-            // Invalid input: hardware was not accessed.
-            Err(TxError::Payload(PayloadError::InvalidLength)) => {}
-
-            // All other transmission failures are treated as critical.
-            Err(_) => {
-                self.state = RadioState::Faulted;
-            }
-        }
-
-        result
-    }
-
-    pub fn flush_tx(&mut self) -> Result<(), SPI::Error> {
+    /// Discards all pending payloads from the TX FIFO.
+    fn flush_tx(&mut self) -> Result<(), SPI::Error> {
         self.spi.write(&[FLUSH_TX])
-    }
-
-    pub fn release(self) -> (SPI, CE) {
-        (self.spi, self.ce)
-    }
-
-    pub fn state(&self) -> RadioState {
-        self.state
     }
 
     fn configure_tx(&mut self, config: &TxConfig) -> Result<(), ConfigureError<SPI::Error>> {
@@ -419,6 +507,7 @@ mod tests {
     use super::*;
 
     use embedded_hal_mock::eh1::MockError;
+    use embedded_hal_mock::eh1::delay::NoopDelay;
     use embedded_hal_mock::eh1::digital::{Mock as PinMock, State, Transaction as PinTransaction};
     use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction};
 
@@ -634,8 +723,6 @@ mod tests {
 
     #[test]
     fn pulse_ce_high_then_low() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let spi = SpiMock::new(&[]);
 
         let ce_expectations = [
@@ -661,8 +748,6 @@ mod tests {
 
     #[test]
     fn transmit_success() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let expectations = [
             // FLUSH_TX
             Transaction::transaction_start(),
@@ -715,8 +800,6 @@ mod tests {
 
     #[test]
     fn transmit_max_retries() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let expectations = [
             // FLUSH_TX
             Transaction::transaction_start(),
@@ -763,8 +846,6 @@ mod tests {
 
     #[test]
     fn transmit_timeout() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let mut expectations = vec![
             // FLUSH_TX
             Transaction::transaction_start(),
@@ -823,8 +904,6 @@ mod tests {
 
     #[test]
     fn pulse_ce_fails_when_set_high_fails() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let spi = SpiMock::new(&[]);
 
         let error = MockError::Io(ErrorKind::Other);
@@ -852,10 +931,6 @@ mod tests {
 
     #[test]
     fn pulse_ce_fails_when_set_low_fails() {
-        use embedded_hal_mock::eh1::MockError;
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-        use std::io::ErrorKind;
-
         let spi = SpiMock::new(&[]);
 
         let error = MockError::Io(ErrorKind::Other);
@@ -887,8 +962,6 @@ mod tests {
 
     #[test]
     fn pulse_ce_retries_set_low_after_failure() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let spi = SpiMock::new(&[]);
         let error = MockError::Io(ErrorKind::Other);
 
@@ -934,8 +1007,6 @@ mod tests {
 
     #[test]
     fn initialize_tx_transitions_from_unknown_to_ready() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let expectations = [
             // 1. Disable Auto ACK.
             Transaction::transaction_start(),
@@ -1008,8 +1079,6 @@ mod tests {
 
     #[test]
     fn initialize_tx_verification_failure_sets_faulted() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let expectations = [
             // 1. Disable Auto ACK.
             Transaction::transaction_start(),
@@ -1084,8 +1153,6 @@ mod tests {
 
     #[test]
     fn transmit_rejects_unknown_radio() {
-        use embedded_hal_mock::eh1::delay::NoopDelay;
-
         let spi = SpiMock::new(&[]);
         let ce = PinMock::new(&[]);
 
@@ -1098,6 +1165,35 @@ mod tests {
 
         assert_eq!(result, Err(TxError::NotReady));
         assert_eq!(radio.state(), RadioState::Unknown);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn transmit_rejects_invalid_payload_without_hardware_access() {
+        let spi = SpiMock::new(&[]);
+        let ce = PinMock::new(&[]);
+
+        let mut radio = Nrf24::new(spi, ce);
+        radio.state = RadioState::Ready;
+
+        let mut delay = NoopDelay::new();
+
+        let empty = radio.transmit(&[], &mut delay);
+
+        assert_eq!(empty, Err(TxError::Payload(PayloadError::InvalidLength)));
+
+        let oversized = radio.transmit(&[0u8; 33], &mut delay);
+
+        assert_eq!(
+            oversized,
+            Err(TxError::Payload(PayloadError::InvalidLength))
+        );
+
+        assert_eq!(radio.state(), RadioState::Ready);
 
         let (mut spi, mut ce) = radio.release();
 
