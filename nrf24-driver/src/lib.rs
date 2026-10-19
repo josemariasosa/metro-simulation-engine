@@ -50,12 +50,21 @@ pub enum ConfigureError<E> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TxError<SpiError, PinError> {
+    NotReady,
     Spi(SpiError),
     Pin(PinError),
     Payload(PayloadError<SpiError>),
     Timeout,
     MaxRetries,
     FifoNotEmpty,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InitError<SpiError, PinError> {
+    NotReady,
+    Configure(ConfigureError<SpiError>),
+    Pin(PinError),
+    VerificationFailed,
 }
 
 // *****************
@@ -78,6 +87,13 @@ impl TxConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadioState {
+    Unknown,
+    Ready,
+    Faulted,
+}
+
 // **********
 // * Driver *
 // **********
@@ -85,6 +101,7 @@ impl TxConfig {
 pub struct Nrf24<SPI, CE> {
     spi: SPI,
     ce: CE,
+    state: RadioState,
 }
 
 impl<SPI, CE> Nrf24<SPI, CE>
@@ -93,35 +110,32 @@ where
     CE: OutputPin,
 {
     pub fn new(spi: SPI, ce: CE) -> Self {
-        Self { spi, ce }
+        Self {
+            spi,
+            ce,
+            state: RadioState::Unknown,
+        }
     }
 
-    pub fn configure_tx(&mut self, config: &TxConfig) -> Result<(), ConfigureError<SPI::Error>> {
-        // Disable Auto ACK.
-        self.write_register(EN_AA, 0x00)
-            .map_err(ConfigureError::Spi)?;
+    pub fn initialize_tx<D: DelayNs>(
+        &mut self,
+        config: &TxConfig,
+        delay: &mut D,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        // A faulted radio cannot be reinitialized implicitly.
+        if self.state == RadioState::Faulted {
+            return Err(InitError::NotReady);
+        }
 
-        // Configure RF channel.
-        self.write_register(RF_CH, config.channel)
-            .map_err(ConfigureError::Spi)?;
+        let result = self.initialize_tx_inner(config, delay);
 
-        // 1 Mbps, minimum output power.
-        self.write_register(RF_SETUP, 0x00)
-            .map_err(ConfigureError::Spi)?;
+        self.state = if result.is_ok() {
+            RadioState::Ready
+        } else {
+            RadioState::Faulted
+        };
 
-        // Configure destination address.
-        self.write_register_bytes(TX_ADDR, &config.address)
-            .map_err(ConfigureError::Register)?;
-
-        // Enable PTX mode.
-        let original = self.read_register(CONFIG).map_err(ConfigureError::Spi)?;
-
-        let tx_config = (original | PWR_UP) & !PRIM_RX;
-
-        self.write_register(CONFIG, tx_config)
-            .map_err(ConfigureError::Spi)?;
-
-        Ok(())
+        result
     }
 
     pub fn pulse_ce<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), CE::Error> {
@@ -213,6 +227,32 @@ where
         Ok(())
     }
 
+    pub fn transmit<D: DelayNs>(
+        &mut self,
+        payload: &[u8],
+        delay: &mut D,
+    ) -> Result<(), TxError<SPI::Error, CE::Error>> {
+        if self.state != RadioState::Ready {
+            return Err(TxError::NotReady);
+        }
+
+        let result = self.transmit_inner(payload, delay);
+
+        match &result {
+            Ok(()) => {}
+
+            // Invalid input: hardware was not accessed.
+            Err(TxError::Payload(PayloadError::InvalidLength)) => {}
+
+            // All other transmission failures are treated as critical.
+            Err(_) => {
+                self.state = RadioState::Faulted;
+            }
+        }
+
+        result
+    }
+
     pub fn flush_tx(&mut self) -> Result<(), SPI::Error> {
         self.spi.write(&[FLUSH_TX])
     }
@@ -221,7 +261,100 @@ where
         (self.spi, self.ce)
     }
 
-    pub fn transmit<D: DelayNs>(
+    pub fn state(&self) -> RadioState {
+        self.state
+    }
+
+    fn configure_tx(&mut self, config: &TxConfig) -> Result<(), ConfigureError<SPI::Error>> {
+        // Disable Auto ACK.
+        self.write_register(EN_AA, 0x00)
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure RF channel.
+        self.write_register(RF_CH, config.channel)
+            .map_err(ConfigureError::Spi)?;
+
+        // 1 Mbps, minimum output power.
+        self.write_register(RF_SETUP, 0x00)
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure destination address.
+        self.write_register_bytes(TX_ADDR, &config.address)
+            .map_err(ConfigureError::Register)?;
+
+        // Enable PTX mode.
+        let original = self.read_register(CONFIG).map_err(ConfigureError::Spi)?;
+
+        let tx_config = (original | PWR_UP) & !PRIM_RX;
+
+        self.write_register(CONFIG, tx_config)
+            .map_err(ConfigureError::Spi)?;
+
+        Ok(())
+    }
+
+    fn initialize_tx_inner<D: DelayNs>(
+        &mut self,
+        config: &TxConfig,
+        delay: &mut D,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        // 1. Keep the radio inactive during configuration.
+        self.ce.set_low().map_err(InitError::Pin)?;
+
+        // 2. Configure RF registers and power up in PTX mode.
+        self.configure_tx(config).map_err(InitError::Configure)?;
+
+        // 3. Wait for the radio to settle.
+        delay.delay_ms(2);
+
+        // 4. Verify the essential configuration.
+        self.verify_tx_config(config)?;
+
+        Ok(())
+    }
+
+    fn verify_tx_config(
+        &mut self,
+        config: &TxConfig,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        const CONFIG: u8 = 0x00;
+        const EN_AA: u8 = 0x01;
+        const RF_CH: u8 = 0x05;
+        const RF_SETUP: u8 = 0x06;
+        const TX_ADDR: u8 = 0x10;
+
+        const PWR_UP: u8 = 1 << 1;
+        const PRIM_RX: u8 = 1 << 0;
+
+        let read = |radio: &mut Self, register| {
+            radio
+                .read_register(register)
+                .map_err(|error| InitError::Configure(ConfigureError::Spi(error)))
+        };
+
+        let config_reg = read(self, CONFIG)?;
+        let en_aa = read(self, EN_AA)?;
+        let channel = read(self, RF_CH)?;
+        let rf_setup = read(self, RF_SETUP)?;
+
+        let mut address = [0u8; 5];
+
+        self.read_register_bytes(TX_ADDR, &mut address)
+            .map_err(|error| InitError::Configure(ConfigureError::Register(error)))?;
+
+        if config_reg & (PWR_UP | PRIM_RX) != PWR_UP
+            || en_aa != 0
+            || channel != config.channel
+            || rf_setup != 0
+            || address != config.address
+        {
+            return Err(InitError::VerificationFailed);
+        }
+
+        Ok(())
+    }
+
+    fn transmit_inner<D: DelayNs>(
         &mut self,
         payload: &[u8],
         delay: &mut D,
@@ -513,6 +646,10 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         radio.pulse_ce(&mut delay).unwrap();
@@ -562,6 +699,10 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         radio.transmit(&[0x01, 0x02, 0x03], &mut delay).unwrap();
@@ -604,6 +745,10 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         let result = radio.transmit(&[0x01, 0x02, 0x03], &mut delay);
@@ -653,11 +798,22 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         let result = radio.transmit(&[0x01], &mut delay);
 
         assert_eq!(result, Err(TxError::Timeout));
+        assert_eq!(radio.state(), RadioState::Faulted);
+
+        // A second transmission must be rejected immediately.
+        let second = radio.transmit(&[0x01], &mut delay);
+
+        assert_eq!(second, Err(TxError::NotReady));
+        assert_eq!(radio.state(), RadioState::Faulted);
 
         let (mut spi, mut ce) = radio.release();
 
@@ -678,6 +834,10 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         let result = radio.pulse_ce(&mut delay);
@@ -709,6 +869,10 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         let result = radio.pulse_ce(&mut delay);
@@ -737,11 +901,203 @@ mod tests {
         let ce = PinMock::new(&ce_expectations);
 
         let mut radio = Nrf24::new(spi, ce);
+
+        // Test fixture: initialization is tested separately.
+        radio.state = RadioState::Ready;
+
         let mut delay = NoopDelay::new();
 
         let result = radio.pulse_ce(&mut delay);
 
         assert_eq!(result, Err(error));
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn new_radio_starts_in_unknown_state() {
+        let spi = SpiMock::new(&[]);
+        let ce = PinMock::new(&[]);
+
+        let radio = Nrf24::new(spi, ce);
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn initialize_tx_transitions_from_unknown_to_ready() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let expectations = [
+            // 1. Disable Auto ACK.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x21, 0x00], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 2. RF_CH = 50.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x25, 0x32], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 3. RF_SETUP = 0x00.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x26, 0x00], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 4. TX_ADDR = [0xE7; 5].
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            Transaction::transaction_end(),
+            // 5. Read original CONFIG = 0x08.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x08]),
+            Transaction::transaction_end(),
+            // 6. Power up in PTX mode: CONFIG = 0x0A.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x20, 0x0A], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 7. Verify CONFIG.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x0A]),
+            Transaction::transaction_end(),
+            // 8. Verify EN_AA.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x01, 0xFF], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 9. Verify RF_CH.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x05, 0xFF], vec![0x0E, 0x32]),
+            Transaction::transaction_end(),
+            // 10. Verify RF_SETUP.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x06, 0xFF], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 11. Verify TX_ADDR.
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x10]),
+            Transaction::read_vec(vec![0xE7; 5]),
+            Transaction::transaction_end(),
+        ];
+
+        let ce_expectations = [PinTransaction::set(State::Low)];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let config = TxConfig::new(50, [0xE7; 5]).unwrap();
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        radio.initialize_tx(&config, &mut delay).unwrap();
+
+        assert_eq!(radio.state(), RadioState::Ready);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn initialize_tx_verification_failure_sets_faulted() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let expectations = [
+            // 1. Disable Auto ACK.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x21, 0x00], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 2. RF_CH = 50.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x25, 0x32], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 3. RF_SETUP = 0x00.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x26, 0x00], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 4. TX_ADDR = [0xE7; 5].
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            Transaction::transaction_end(),
+            // 5. Read original CONFIG = 0x08.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x08]),
+            Transaction::transaction_end(),
+            // 6. Power up in PTX mode: CONFIG = 0x0A.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x20, 0x0A], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 7. Verify CONFIG.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x0A]),
+            Transaction::transaction_end(),
+            // 8. Verify EN_AA.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x01, 0xFF], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 9. Expected channel 50, but hardware reports channel 42.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x05, 0xFF], vec![0x0E, 0x2A]),
+            Transaction::transaction_end(),
+            // 10. Verify RF_SETUP.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x06, 0xFF], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 11. Verify TX_ADDR.
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x10]),
+            Transaction::read_vec(vec![0xE7; 5]),
+            Transaction::transaction_end(),
+        ];
+
+        let ce_expectations = [PinTransaction::set(State::Low)];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let config = TxConfig::new(50, [0xE7; 5]).unwrap();
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        let result = radio.initialize_tx(&config, &mut delay);
+
+        assert_eq!(result, Err(InitError::VerificationFailed));
+
+        assert_eq!(radio.state(), RadioState::Faulted);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn transmit_rejects_unknown_radio() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let spi = SpiMock::new(&[]);
+        let ce = PinMock::new(&[]);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        let result = radio.transmit(&[0x01], &mut delay);
+
+        assert_eq!(result, Err(TxError::NotReady));
+        assert_eq!(radio.state(), RadioState::Unknown);
 
         let (mut spi, mut ce) = radio.release();
 
