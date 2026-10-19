@@ -126,8 +126,15 @@ where
 
     pub fn pulse_ce<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), CE::Error> {
         self.ce.set_high()?;
+
         delay.delay_us(20);
-        self.ce.set_low()?;
+
+        if let Err(error) = self.ce.set_low() {
+            // Best-effort recovery: try to return CE to LOW.
+            let _ = self.ce.set_low();
+
+            return Err(error);
+        }
 
         Ok(())
     }
@@ -273,10 +280,12 @@ where
 mod tests {
     extern crate std;
 
+    use std::io::ErrorKind;
     use std::vec;
 
     use super::*;
 
+    use embedded_hal_mock::eh1::MockError;
     use embedded_hal_mock::eh1::digital::{Mock as PinMock, State, Transaction as PinTransaction};
     use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction};
 
@@ -556,6 +565,183 @@ mod tests {
         let mut delay = NoopDelay::new();
 
         radio.transmit(&[0x01, 0x02, 0x03], &mut delay).unwrap();
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn transmit_max_retries() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let expectations = [
+            // FLUSH_TX
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xE1]),
+            Transaction::transaction_end(),
+            // Clear STATUS flags.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x27, 0x70], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // Load payload.
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xA0, 0x01, 0x02, 0x03]),
+            Transaction::transaction_end(),
+            // STATUS: MAX_RT = 1.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x07, 0xFF], vec![0x1E, 0x1E]),
+            Transaction::transaction_end(),
+        ];
+
+        let ce_expectations = [
+            PinTransaction::set(State::High),
+            PinTransaction::set(State::Low),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let result = radio.transmit(&[0x01, 0x02, 0x03], &mut delay);
+
+        assert_eq!(result, Err(TxError::MaxRetries));
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn transmit_timeout() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let mut expectations = vec![
+            // FLUSH_TX
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xE1]),
+            Transaction::transaction_end(),
+            // Clear interrupt flags
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x27, 0x70], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // Load payload
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0xA0, 0x01]),
+            Transaction::transaction_end(),
+        ];
+
+        // Radio never reports TX_DS or MAX_RT.
+        for _ in 0..100 {
+            expectations.extend([
+                Transaction::transaction_start(),
+                Transaction::transfer_in_place(vec![0x07, 0xFF], vec![0x0E, 0x0E]),
+                Transaction::transaction_end(),
+            ]);
+        }
+
+        let ce_expectations = [
+            PinTransaction::set(State::High),
+            PinTransaction::set(State::Low),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let result = radio.transmit(&[0x01], &mut delay);
+
+        assert_eq!(result, Err(TxError::Timeout));
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn pulse_ce_fails_when_set_high_fails() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let spi = SpiMock::new(&[]);
+
+        let error = MockError::Io(ErrorKind::Other);
+
+        let ce_expectations = [PinTransaction::set(State::High).with_error(error.clone())];
+
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let result = radio.pulse_ce(&mut delay);
+
+        assert_eq!(result, Err(error));
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn pulse_ce_fails_when_set_low_fails() {
+        use embedded_hal_mock::eh1::MockError;
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+        use std::io::ErrorKind;
+
+        let spi = SpiMock::new(&[]);
+
+        let error = MockError::Io(ErrorKind::Other);
+
+        let ce_expectations = [
+            PinTransaction::set(State::High),
+            PinTransaction::set(State::Low).with_error(error.clone()),
+            PinTransaction::set(State::Low),
+        ];
+
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let result = radio.pulse_ce(&mut delay);
+
+        assert_eq!(result, Err(error));
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn pulse_ce_retries_set_low_after_failure() {
+        use embedded_hal_mock::eh1::delay::NoopDelay;
+
+        let spi = SpiMock::new(&[]);
+        let error = MockError::Io(ErrorKind::Other);
+
+        let ce_expectations = [
+            PinTransaction::set(State::High),
+            PinTransaction::set(State::Low).with_error(error.clone()),
+            PinTransaction::set(State::Low),
+        ];
+
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let result = radio.pulse_ce(&mut delay);
+
+        assert_eq!(result, Err(error));
 
         let (mut spi, mut ce) = radio.release();
 
