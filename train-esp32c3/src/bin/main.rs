@@ -20,39 +20,26 @@ use esp_hal::{
     },
     time::{Duration, Instant, Rate},
 };
-use log::info;
-use nrf24_driver::Nrf24;
-
 use le_rove_protocol::{
     codec::{decode, encode},
     frame::Frame,
     identity::{NodeId, TrainId},
     message::{Event, Location, Message, StopReason},
 };
+use log::info;
+use nrf24_driver::{Nrf24, TxConfig};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 // nRF24L01+ registers
-const CONFIG: u8 = 0x00;
-const EN_AA: u8 = 0x01;
-const RF_CH: u8 = 0x05;
-const RF_SETUP: u8 = 0x06;
-const STATUS: u8 = 0x07;
-const TX_ADDR: u8 = 0x10;
 const FIFO_STATUS: u8 = 0x17;
+const STATUS: u8 = 0x07;
 
 // Register bits
-const PWR_UP: u8 = 1 << 1;
-const PRIM_RX: u8 = 1 << 0;
 const RX_DR: u8 = 1 << 6;
 const TX_DS: u8 = 1 << 5;
 const MAX_RT: u8 = 1 << 4;
 const TX_EMPTY: u8 = 1 << 4;
-
-// Lab configuration
-const CHANNEL: u8 = 50;
-const TX_ADDRESS: [u8; 5] = [0xE7; 5];
-const RF_SETUP_1MBPS_MIN_POWER: u8 = 0x00;
 
 fn delay(duration: Duration) {
     let start = Instant::now();
@@ -64,41 +51,14 @@ where
     SPI: SpiDevice,
     SPI::Error: core::fmt::Debug,
 {
-    // Disable Auto ACK: no receiver is available yet.
-    radio.write_register(EN_AA, 0x00).unwrap();
-    assert_eq!(radio.read_register(EN_AA).unwrap(), 0x00);
+    let config = TxConfig::new(50, [0xE7; 5]).unwrap();
 
-    // Channel 50 = 2450 MHz.
-    radio.write_register(RF_CH, CHANNEL).unwrap();
-    assert_eq!(radio.read_register(RF_CH).unwrap(), CHANNEL);
+    radio.configure_tx(&config).unwrap();
 
-    // 1 Mbps, minimum transceiver output power.
-    radio
-        .write_register(RF_SETUP, RF_SETUP_1MBPS_MIN_POWER)
-        .unwrap();
-    assert_eq!(
-        radio.read_register(RF_SETUP).unwrap(),
-        RF_SETUP_1MBPS_MIN_POWER
-    );
-
-    // Set and verify the radio destination address.
-    radio.write_register_bytes(TX_ADDR, &TX_ADDRESS).unwrap();
-
-    let mut address = [0u8; 5];
-    radio.read_register_bytes(TX_ADDR, &mut address).unwrap();
-    assert_eq!(address, TX_ADDRESS);
-
-    // Power up in PTX mode.
-    let original = radio.read_register(CONFIG).unwrap();
-    let tx_config = (original | PWR_UP) & !PRIM_RX;
-
-    radio.write_register(CONFIG, tx_config).unwrap();
-    assert_eq!(radio.read_register(CONFIG).unwrap(), tx_config);
-
-    // Allow the transceiver to settle after PWR_UP.
+    // PWR_UP requires up to 1.5 ms before TX.
     delay(Duration::from_millis(2));
 
-    info!("RF configured: channel={}, PTX, 1Mbps", CHANNEL);
+    info!("RF configured: channel=50, PTX, 1Mbps");
 }
 
 fn protocol_self_test() -> ([u8; 32], usize) {

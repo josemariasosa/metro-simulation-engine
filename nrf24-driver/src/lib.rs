@@ -10,6 +10,15 @@ const W_TX_PAYLOAD: u8 = 0xA0;
 
 const FLUSH_TX: u8 = 0xE1;
 
+const CONFIG: u8 = 0x00;
+const EN_AA: u8 = 0x01;
+const RF_CH: u8 = 0x05;
+const RF_SETUP: u8 = 0x06;
+const TX_ADDR: u8 = 0x10;
+
+const PWR_UP: u8 = 1 << 1;
+const PRIM_RX: u8 = 1 << 0;
+
 // **********
 // * Errors *
 // **********
@@ -29,6 +38,12 @@ pub enum RegisterError<E> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigError {
     InvalidChannel,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConfigureError<E> {
+    Spi(E),
+    Register(RegisterError<E>),
 }
 
 // *****************
@@ -65,6 +80,34 @@ where
 {
     pub fn new(spi: SPI) -> Self {
         Self { spi }
+    }
+
+    pub fn configure_tx(&mut self, config: &TxConfig) -> Result<(), ConfigureError<SPI::Error>> {
+        // Disable Auto ACK.
+        self.write_register(EN_AA, 0x00)
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure RF channel.
+        self.write_register(RF_CH, config.channel)
+            .map_err(ConfigureError::Spi)?;
+
+        // 1 Mbps, minimum output power.
+        self.write_register(RF_SETUP, 0x00)
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure destination address.
+        self.write_register_bytes(TX_ADDR, &config.address)
+            .map_err(ConfigureError::Register)?;
+
+        // Enable PTX mode.
+        let original = self.read_register(CONFIG).map_err(ConfigureError::Spi)?;
+
+        let tx_config = (original | PWR_UP) & !PRIM_RX;
+
+        self.write_register(CONFIG, tx_config)
+            .map_err(ConfigureError::Spi)?;
+
+        Ok(())
     }
 
     pub fn read_register(&mut self, register: u8) -> Result<u8, SPI::Error> {
@@ -312,5 +355,45 @@ mod tests {
         let config = TxConfig::new(126, [0xE7; 5]);
 
         assert_eq!(config, Err(ConfigError::InvalidChannel));
+    }
+
+    #[test]
+    fn configure_tx_writes_expected_registers() {
+        let expectations = [
+            // Disable Auto ACK.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x21, 0x00], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // Set RF channel to 50.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x25, 0x32], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // 1 Mbps, minimum output power.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x26, 0x00], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+            // Set TX address.
+            Transaction::transaction_start(),
+            Transaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            Transaction::transaction_end(),
+            // Read CONFIG (original = 0x08).
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x08]),
+            Transaction::transaction_end(),
+            // Write CONFIG = 0x0A.
+            Transaction::transaction_start(),
+            Transaction::transfer_in_place(vec![0x20, 0x0A], vec![0x0E, 0x00]),
+            Transaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let mut radio = Nrf24::new(spi);
+
+        let config = TxConfig::new(50, [0xE7; 5]).unwrap();
+
+        radio.configure_tx(&config).unwrap();
+
+        let mut spi = radio.release();
+        spi.done();
     }
 }
