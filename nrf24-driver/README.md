@@ -1,243 +1,205 @@
 # nrf24-driver
 
-A lightweight, platform-independent Rust driver for nRF24L01+ compatible 2.4 GHz radio transceivers.
-
-Part of the [LE ROVE](../README.md) railway simulation and physical train project.
+A portable, allocation-free `no_std` Rust driver for nRF24L01+ transceivers.
+It uses `embedded-hal` 1.0 traits and does not depend on a particular MCU HAL.
+The driver is part of the [Le Rove project](../README.md), but this crate
+transmits and receives raw byte payloads; application framing belongs to the
+consumer.
 
 ## Overview
 
-The goal of this crate is to provide a reusable, `no_std` driver for communicating with nRF24L01+ compatible RF modules over SPI.
+The public workflow is receive-first. [`Nrf24::initialize`] configures the
+radio and starts listening on RX pipe 0. [`Nrf24::transmit`] synchronously
+switches RX → TX → RX for one payload; on success it returns with RX listening
+again. [`Nrf24::receive`] polls FIFO status and reads at most one payload into
+a caller-owned buffer. It does not wait for a packet or use the IRQ pin.
 
-The driver is designed to be independent of any specific microcontroller or hardware abstraction layer (HAL), using the [`embedded-hal`](https://github.com/rust-embedded/embedded-hal) traits.
+Initialization fixes the address width to five bytes, CRC to one byte, and
+dynamic payloads to 1–32 bytes on pipe 0. TX always uses the nRF24L01+'s
+selective NO_ACK command: it requests no acknowledgment and performs no
+automatic retransmission. The driver still enables pipe-0 auto-ack in the
+receiver configuration because the radio requires EN_AA for dynamic payload
+lengths. These are separate settings: receiving an ACK-requesting packet may
+still cause an ACK even though this driver's own outgoing packets use NO_ACK.
 
-Target platforms include:
+All SPI, CE, and delay behavior is supplied by the consumer's HAL. SPI
+transactions are synchronous, and critical failures put the software driver
+in a fail-stop state. Mocks and successful compilation do not validate a
+physical module or prove over-the-air delivery.
 
-- ESP32-C3 — initial development platform
-- ESP32-S3
-- Raspberry Pi Pico 2 W (RP2350)
+## Implemented features
 
-**Hardware status:** The initial module is believed to be an nRF24L01+ PA/LNA variant with an external SMA antenna. Its exact chip identity has not yet been independently confirmed.
+| Feature | Status and coverage |
+|---|---|
+| SPI register read/write and multi-byte address access | Implemented; mock SPI tests cover command bytes and address transfers. |
+| RF channel 0–125 | Implemented; invalid-channel and register-configuration tests. |
+| Shared five-byte TX and RX pipe-0 address | Implemented; initialization writes and verifies both addresses. |
+| 250 kbit/s, 1 Mbit/s, and 2 Mbit/s rates | Implemented; RF_SETUP encoding tests. |
+| Four nominal TX power levels | Implemented; RF_SETUP encoding tests. |
+| One-byte CRC | Set and verified by receive-first initialization. |
+| Dynamic Payload Length on pipe 0 | Configured and verified; receive tests cover valid widths through 32 bytes. |
+| Selective NO_ACK transmission | Implemented with `W_TX_PAYLOAD_NOACK`; `FEATURE.EN_DYN_ACK` is configured. |
+| Auto ACK configuration | Receiver pipe 0 has EN_AA enabled for DPL compatibility; outgoing calls do not request ACK. No auto-ack policy setter exists. |
+| Initialization and register verification | Implemented; tests cover configuration, verification failure, state transitions, and timing calls. |
+| RX → TX → RX switching | Implemented; tests cover successful restoration and failures. |
+| TX FIFO handling and payload transmission | Implemented; TX FIFO is flushed before each send and completion is polled. |
+| RX FIFO inspection and dynamic-width read | Implemented; tests cover empty, queued, and multiple payloads. |
+| Payload reception and buffer validation | Implemented; tests cover exact copy length, untouched tail, undersized buffers, and maximum length. |
+| Invalid-width recovery | Invalid widths trigger `FLUSH_RX`; tests cover zero and values above 32, successful recovery, and SPI failures. Recovery discards all queued RX payloads. |
+| Error and fail-stop handling | Implemented; mock tests exercise SPI failures, state rejection, mode restoration, and faulting. |
+| Mocked hardware unit tests | Present using `embedded-hal-mock`; they test software transactions, not actual radio electrical or RF behavior. |
+| Physical over-the-air validation | Not yet established for this driver's TX/RX behavior. |
 
-## Hardware
+The matrix describes implementation and test coverage, not a claim that the
+validation commands below have passed in every environment or that the driver
+has been tested on physical radios.
 
-### RF module
+## Public API
 
-The module uses a 2×4 pin connector with SPI, power and control signals.
+The consumer supplies:
 
-![RF module — pin layout](media/rf1.jpeg)
+- An `embedded_hal::spi::SpiDevice` which owns/manages CSN. Configure its bus
+  for SPI Mode 0, MSB first, at no more than the nRF24L01+'s 10 MHz limit.
+- A separate CE `embedded_hal::digital::OutputPin`.
+- An `embedded_hal::delay::DelayNs` implementation for startup, radio settling,
+  and bounded TX polling delays.
 
-![RF module — additional pin reference](media/rf2.jpeg)
-
-### Pin descriptions
-
-| Pin | Direction (relative to RF module) | Description |
-|---|---|---|
-| VCC | Power | 3.3 V supply |
-| GND | Ground | Common ground |
-| CE | Input | Chip Enable, controls RX/TX operation |
-| CSN | Input | Active-low SPI chip select |
-| SCK | Input | SPI clock |
-| MOSI | Input | SPI data from microcontroller |
-| MISO | Output | SPI data to microcontroller |
-| IRQ | Output | Active-low interrupt, optional |
-
-**Warning:** Do not connect VCC to 5 V. Verify the pinout before powering an unfamiliar module.
-
-### Initial wiring — Seeed XIAO ESP32-C3
-
-| RF module | XIAO ESP32-C3 | Wire color |
-|---|---|---|
-| VCC | 3V3 | Red |
-| GND | GND | Black |
-| CE | D2 / GPIO4 | Yellow |
-| CSN | D3 / GPIO5 | Purple |
-| SCK | D8 / GPIO8 | Blue |
-| MOSI | D10 / GPIO10 | Orange |
-| MISO | D6 / GPIO21 | Gray |
-| IRQ | Not connected | — |
-
-**Note:** MISO was originally connected to GPIO9, but this interfered with the ESP32-C3 boot process. Moving MISO to GPIO21 resolved the issue.
-
-### Planned wiring — Raspberry Pi Pico 2 W (RP2350)
-
-The station firmware (`station-rp2350`) will use the RP2350's SPI0 peripheral to communicate with the nRF24L01+ module.
-
-| RF module | Pico 2 W | Function |
-|---|---|---|
-| VCC | 3V3 | 3.3 V power supply |
-| GND | GND | Common ground |
-| CE | GP20 | Radio enable |
-| CSN | GP21 | Active-low chip select |
-| SCK | GP18 | SPI0 clock |
-| MOSI | GP19 | SPI0 TX |
-| MISO | GP16 | SPI0 RX |
-| IRQ | Not connected | Polling initially |
-
-**Notes:**
-
-- SPI0 will initially operate at 1 MHz, Mode 0.
-- CE and CSN will be controlled through GPIO.
-- GP16 is reserved for SPI0 RX and must not be used for the green LED from previous Pico experiments.
-- Wiring has not yet been physically validated.
-- The station will reuse the existing `nrf24-driver` crate through `embedded-hal` interfaces.
-
-## Architecture
-
-The driver will use `embedded-hal` interfaces for SPI and GPIO operations.
-
-```text
-          Train / Station Firmware
-                    |
-          +---------+---------+
-          |                   |
-   le-rove-protocol      nrf24-driver
-   Encode / Decode       Radio control
-          |                   |
-          |              embedded-hal
-          |                   |
-          |            Platform-specific HAL
-          |                   |
-          +---------+---------+
-                    |
-              RF hardware
-```
-
-The driver must not depend on `le-rove-protocol`, `metro-core`, or a specific microcontroller HAL.
-
-Its responsibility is to configure the transceiver and send or receive byte payloads. Application-level message encoding, decoding and railway behavior belong to other crates.
-
-## Development status
-
-### Completed hardware experiments
-
-- [x] Power module from ESP32-C3 at 3.3 V
-- [x] Initialize SPI at 500 kHz, Mode 0
-- [x] Read `STATUS` register (`0x0E`)
-- [x] Read `CONFIG` register (`0x08`)
-- [x] Read `RF_CH` original value (`0x02`)
-- [x] Write `RF_CH = 0x32` and verify readback
-- [x] Restore `RF_CH = 0x02` and verify readback
-
-These experiments confirm SPI register read/write behavior consistent with the nRF24L01+ register interface. They do not establish RF transmission or reception functionality.
-
-### Planned driver milestones
-
-- [x] Implement register read/write operations
-- [x] Add host-side unit tests using mock SPI
-- [ ] Integrate the driver with ESP32-C3 firmware
-- [x] Configure RF operating parameters
-- [x] Implement TX FIFO operations
-- [ ] Transmit a test payload
-- [x] Implement polling reception and RX status-flag handling
-- [ ] Validate communication between two physical nodes
-
-## First TX/RX test
-
-Use `RadioConfig::new(50, [0xE7; 5])` and `initialize(&config, &mut delay)`
-on **both** nodes, including the transmitter. This selects 1 Mbps, minimum TX
-power, five-byte addresses, one-byte CRC, and dynamic payloads on pipe 0.
-Initialization explicitly sets and verifies CRC and DPL configuration.
-`initialize_tx()` is a legacy diagnostic path, not the initializer for the
-current `transmit()` API.
-
-The public receive API is:
+`Nrf24::new` takes ownership of the SPI device and CE pin without accessing
+hardware. Call `initialize` once with a `RadioConfig`; successful initialization
+leaves the radio listening. Use a 32-byte receive buffer to accept every
+supported payload size. A shorter buffer is valid, but if it is too small the
+oldest payload remains queued and can be retried with a larger one.
 
 ```rust,ignore
-pub fn receive(&mut self, buffer: &mut [u8])
-    -> Result<Option<usize>, RxError<SPI::Error>>
-```
+let config = RadioConfig::new(50, [0xE7; 5])?;
+let mut radio = Nrf24::new(spi_device, ce_pin);
+radio.initialize(&config, &mut delay)?;
 
-After initialization, poll with a 32-byte buffer:
+let payload = [0x01, 0x02, 0x03];
+radio.transmit(&payload, &mut delay)?;
 
-```rust,ignore
 let mut buffer = [0u8; 32];
-if let Some(len) = radio.receive(&mut buffer)? {
-    // Print or decode precisely buffer[..len].
+if let Some(length) = radio.receive(&mut buffer)? {
+    process(&buffer[..length]);
 }
 ```
 
-Each call consumes at most one complete payload, with no allocation or wait for
-an RF packet. SPI transactions themselves are synchronous. Keep polling to drain
-queued packets while also servicing USB CDC; do not wait for an IRQ edge.
+The snippet assumes application-provided variables and error handling. It is
+not a board-specific pin map or a claim of hardware validation. See the
+crate-level documentation and the public API comments for detailed contracts.
 
-- `Ok(None)`: no packet at the FIFO snapshot.
-- `BufferTooSmall { required, available }`: buffer untouched, packet retained;
-  retry with a larger buffer.
-- `NotReady`: initialization/state/mode rejection without hardware access.
-- `InvalidPayloadWidth(width)`: all queued RX packets discarded by recovery;
-  the driver remains Ready/RX. Zero is also rejected by this 1–32-byte API.
-- `Spi(error)`: the driver becomes Faulted with unknown mode, including errors
-  while clearing RX_DR or recovering the FIFO. Do not process buffer contents
-  after an error; a failed read may have partially modified them.
+### State and errors
 
-RX errors have no GPIO error parameter because receive does not operate CE.
-Normal reception preserves CE and mode. Transmission preserves queued RX data.
+The driver starts in `RadioState::Unknown`. Successful `initialize` changes it
+to `Ready` in RX mode. `Faulted` means the hardware state is uncertain; the
+radio data methods and initializers reject further use. Call `release` to
+recover ownership of the SPI device and CE pin, then reset/reinitialize the
+hardware as appropriate for the board. `release` itself performs no hardware
+reset or pin change.
 
-### Datasheet review
+Invalid TX length, `receive` with no packet, an undersized buffer, and a
+successfully recovered invalid RX width do not fault the driver. Critical SPI,
+GPIO, verification, and TX-operation errors do. A TX error can be returned
+after the packet was already transmitted if RX restoration then fails; avoid
+blindly retrying application data in that case.
 
-The [Nordic specification](https://www.sparkfun.com/datasheets/Components/SMD/nRF24L01Pluss_Preliminary_Product_Specification_v1_0.pdf)
-(§7.3.4, table 20, §8.4 and register-map note c) defines `R_RX_PL_WID=0x60`,
-`R_RX_PAYLOAD=0x61`, and `FLUSH_RX=0xE2`. Widths over 32 require flushing.
-The RX FIFO holds three packets. RX_DR is an arrival notification, cleared by
-writing one; FIFO_STATUS determines whether unread packets remain. The driver
-writes only RX_DR, preserving TX_DS/MAX_RT, and checks the FIFO on every call.
-A racing arrival remains discoverable even if its notification was cleared.
+## Hardware configuration
 
-**No ACK packets in the initial test:** DPL requires ENAA_P0 enabled.
-As [Nordic explains](https://devzone.nordicsemi.com/f/nordic-q-a/99192/using-nrf24l01-with-pure-assembler-programing),
-use EN_DYN_ACK and `W_TX_PAYLOAD_NOACK=0xB0` to suppress acknowledgments while
-retaining dynamic framing. This driver now configures that combination.
-`RadioConfig::auto_ack()` remains false: transmitted packets request no ACK,
-although EN_AA is nonzero. Both peers must use this configuration.
+The following are general integration requirements, not board-specific wiring
+instructions:
 
-No `ACTIVATE 0x73` fallback is implemented: [Nordic confirms that genuine
-nRF24L01+ ignores ACTIVATE](https://devzone.nordicsemi.com/f/nordic-q-a/29601/nrf24l01-activate-command).
-FEATURE/DYNPD readback failure aborts initialization. The module's actual silicon
-identity and DPL behavior still require physical verification; no undocumented
-clone support is assumed.
+- **Supply:** The nRF24L01+ IC is specified for 1.9–3.6 V. Use a clean supply
+  within the voltage limits of the actual module; do not assume a module has a
+  regulator or 5 V tolerance. PA/LNA modules can have larger current peaks
+  than the bare IC. Provide suitable local decoupling and verify supply
+  integrity during radio activity.
+- **SPI:** Connect SCK, MOSI, and MISO to the MCU SPI bus. Use Mode 0,
+  MSB-first, and stay at or below 10 MHz at the radio. Start at a lower rate
+  for initial bring-up if appropriate for the board.
+- **CSN:** The supplied `SpiDevice` owns CSN and must assert it for each SPI
+  transaction.
+- **CE:** Connect CE to a controllable GPIO output. The driver controls CE;
+  the pin is not interchangeable with CSN.
+- **IRQ:** Not required. The driver polls synchronously and does not configure
+  or consume IRQ.
+- **RF peers:** Configure the same channel, five-byte address, data rate, and
+  compatible CRC on both ends. This driver uses one-byte CRC and pipe 0.
+  Receiving dynamic payloads requires compatible DPL support and enabled
+  auto-ack configuration at pipe 0. Its own transmissions are NO_ACK; use
+  NO_ACK-compatible peer operation for the documented test workflow.
+- **Startup:** Allow board/module supply and the transceiver's power-on reset
+  to complete before initialization. The driver's 2 ms radio power-up delay is
+  not a delay for board power sequencing.
 
-FLUSH_RX must not interrupt an ACK transmission. The test uses only NO_ACK
-frames from these peers. Receiving ACK-requesting traffic is outside this test
-configuration; supporting it needs review of recovery timing before enabling it.
+Verify the module pinout and electrical ratings before wiring. Existing project
+notes report SPI register read/write experiments with a module on an ESP32-C3;
+they do not establish this driver's RF communication, module identity, or
+compatibility with a Pico 2 W installation. No pin assignment is prescribed
+here.
 
-### Integration and hardware limitations
+## Tests and verification
 
-The driver API is sufficient to send an encoded Le Rove frame of 1–32 bytes and
-receive its exact bytes. Firmware and protocol files were deliberately untouched.
-The existing firmware still needs these integration changes before a two-board run:
-
-- `train-esp32c3`: replace `initialize_tx()` with `initialize()`.
-- `station-rp2350`: replace the obsolete `TxConfig` import/use with `RadioConfig`,
-  initialize RX, and add receive polling plus USB CDC output.
-
-Use matching channel, address, data rate and payload configuration. Allow the
-module supply to stabilize and complete power-on reset before initialization;
-its internal 2 ms delay covers radio power-up, not board power sequencing.
-Use SPI Mode 0 (start at 1 MHz or below), a properly managed CSN, common ground,
-and stable 3.3 V power/decoupling suitable for the PA/LNA module. Wiring, module
-identity, supply integrity, and actual over-air reception have not been validated
-by these software tests. A successful no-ACK TX does not prove delivery.
-
-## Design principles
-
-- **`no_std`** — No standard-library dependency in the driver
-- **Portable** — Compatible with multiple microcontroller HALs
-- **Allocation-free** — Fixed-size buffers, no heap required
-- **Hardware-independent** — No direct dependencies on `esp-hal` or `rp235x-hal`
-- **Testable** — SPI and GPIO interactions can be tested with mocks
-- **Small API** — Introduce functionality incrementally as hardware experiments require it
-
-## Building
-
-Run host-side checks from the crate directory:
+Run from the workspace root:
 
 ```bash
-cargo check
-cargo test
+cargo fmt --all -- --check
+cargo test -p nrf24-driver
+cargo clippy -p nrf24-driver --all-targets -- -D warnings
+cargo doc -p nrf24-driver --no-deps
+RUSTDOCFLAGS="-D warnings" cargo doc -p nrf24-driver --no-deps
 ```
 
-Embedded firmware builds are managed by their respective consuming projects, such as `train-esp32c3`.
+The driver has no MCU-specific dependencies. Its generic `no_std` code can be
+checked for targets used by consumers, for example:
 
-## License
+```bash
+cargo check -p nrf24-driver --target thumbv8m.main-none-eabihf
+cargo check -p nrf24-driver --target riscv32imc-unknown-none-elf
+```
 
-To be determined.
+For this revision, both target-specific crate checks completed successfully.
+The host validation also completed successfully: 61 unit tests and 1 doctest
+passed, and formatting, strict Clippy, and documentation builds (including
+rustdoc warnings denied) passed. These crate-only checks do not build or certify
+the ESP32-C3 or Pico 2 W firmware projects. ESP32-C3 firmware needs the
+consuming project's Xtensa/RISC-V toolchain configuration as applicable; a
+successful library build is not a hardware test.
+
+## Known Limitations and Future Work
+
+### Relevant to the first physical test
+
+- The exact module silicon and DPL/NO_ACK compatibility are not independently
+  confirmed. Initialization checks FEATURE/DYNPD readback and has no
+  `ACTIVATE` fallback; a module that does not expose those features as
+  configured will fail initialization.
+- RF transmission and reception, receiver sensitivity, range, and timing have
+  not been established by the host mocks. The prior reported register
+  experiments establish only basic SPI register access.
+- Transmission is NO_ACK. A reported TX completion means the radio completed
+  its transmit operation, not that another node received the payload.
+- FIFO flushing to recover an invalid RX width discards every currently queued
+  RX payload, and that recovery is not coordinated with an ACK transmission.
+- The current [station firmware](../station-rp2350/src/main.rs) imports the
+  removed `TxConfig` API, and the [train firmware](../train-esp32c3/src/bin/main.rs)
+  calls the legacy PTX-only `initialize_tx` path. The station must be updated to
+  `RadioConfig` and RX polling, and the train must use `initialize` before
+  `transmit`. These consumer changes are outside this crate's scope.
+
+For the specific ESP32-C3 TX → Pico 2 W RX test, the consumer integration is an
+essential blocker. Once that is addressed, these radio limitations are
+constraints to account for during controlled bring-up; no feature expansion is
+required if the module, pinout, supply, and wiring are verified.
+
+### Optional future work
+
+- Physical interoperability tests across the specific modules and MCU boards.
+- Recovery/reinitialization API after `RadioState::Faulted`.
+- Interrupt-driven or async receive integration.
+- Multi-pipe RX and configurable payload/CRC/address-width strategies.
+- Configurable acknowledged TX and retransmission policy.
+- More diagnostics and measured throughput, latency, and timing.
+
+The legacy `initialize_tx` method remains public for diagnostics, but it leaves
+the radio in PTX standby; the current `transmit` and `receive` data APIs require
+RX mode. Use `initialize` for normal operation.

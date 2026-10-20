@@ -13,7 +13,7 @@ use crate::registers::*;
 
 /// nRF24L01+ driver owning the SPI device and CE output pin.
 ///
-/// Starts in `RadioState::Unknown`. Call `initialize()`
+/// Starts in [`RadioState::Unknown`]. Call [`Self::initialize`]
 /// before attempting to transmit or receive.
 ///
 /// SPI chip-select (CSN) is managed by the supplied `SpiDevice`.
@@ -31,7 +31,10 @@ where
 {
     /// Creates a driver without accessing the hardware.
     ///
-    /// The initial state is `RadioState::Unknown`.
+    /// Takes ownership of an `embedded-hal` 1.0 [`SpiDevice`] (including its
+    /// CSN management) and a separate CE [`OutputPin`]. Configure SPI Mode 0,
+    /// MSB-first, at no more than 10 MHz before calling. No pin level is set.
+    /// The initial state is [`RadioState::Unknown`], with no known mode.
     pub fn new(spi: SPI, ce: CE) -> Self {
         Self {
             spi,
@@ -43,12 +46,15 @@ where
 
     /// Consumes the driver and returns ownership of SPI and CE.
     ///
-    /// Does not reset or power down the radio.
+    /// Valid in every state, including [`RadioState::Faulted`]. Performs no
+    /// hardware I/O: CE, power, FIFOs, and configuration are left as they were.
+    /// The caller must establish safe hardware conditions before reuse; creating
+    /// a new driver around these resources does not reset the transceiver.
     pub fn release(self) -> (SPI, CE) {
         (self.spi, self.ce)
     }
 
-    /// Returns the current operational state of the driver.
+    /// Returns the software state without inspecting hardware or changing CE.
     pub fn state(&self) -> RadioState {
         self.state
     }
@@ -57,13 +63,18 @@ where
 /// Operational state of the radio driver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioState {
-    /// Hardware has not completed verified initialization.
+    /// No initialization has completed. Call [`Nrf24::initialize`] or release resources.
     Unknown,
 
-    /// Verified initialization succeeded; the operating mode is known.
+    /// Initialization succeeded and the mode is known. After [`Nrf24::initialize`],
+    /// receive and transmit are allowed. Legacy [`Nrf24::initialize_tx`] instead
+    /// leaves PTX standby, where both data APIs reject calls despite this state.
     Ready,
 
-    /// A critical error occurred; further transmissions and receptions are blocked.
+    /// Hardware state is uncertain after a critical error. Both data APIs and
+    /// both initializers reject further use. Inspect the error or call
+    /// [`Nrf24::release`]; recovery/reset is the caller's responsibility.
+    /// This is a software fail-stop, not a guarantee of CE low or power-down.
     Faulted,
 }
 

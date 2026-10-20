@@ -5,14 +5,23 @@ where
     SPI: SpiDevice,
     CE: OutputPin,
 {
-    /// Initializes the transceiver in receive-first mode.
+    /// Configures, verifies, and starts receive-first operation on pipe 0.
     ///
-    /// On success, the radio enters RX mode and is ready to receive.
+    /// Requires [`RadioState::Unknown`]. Drives CE low, writes RF settings,
+    /// shared TX/RX addresses, five-byte address width, one-byte CRC, and DPL
+    /// with selective NO_ACK. After a 2 ms power-up wait, reads back CONFIG,
+    /// EN_AA, EN_RXADDR, RF_CH, RF_SETUP, SETUP_AW, FEATURE, DYNPD pipe 0, and
+    /// both addresses. Raises CE and waits 130 µs before returning Ready/RX.
+    /// Successful transmission later restores this listening mode automatically.
     ///
-    /// Transmissions switch temporarily to TX and
-    /// restore RX automatically.
+    /// The caller must let the supply stabilize and power-on reset finish before
+    /// calling. The 2 ms wait assumes the datasheet's recommended crystal
+    /// (Ls < 30 mH); it is not a supply-startup delay. FIFOs and stale STATUS
+    /// flags are not reset by initialization. No ACTIVATE fallback is attempted.
     ///
-    /// Any initialization failure transitions the driver to Faulted.
+    /// [`InitError::NotReady`] leaves state and hardware unchanged. Any attempted
+    /// initialization failing on SPI, CE, or readback marks the driver Faulted
+    /// with unknown mode; CE is not guaranteed low after a GPIO failure.
     pub fn initialize<D: DelayNs>(
         &mut self,
         config: &RadioConfig,
@@ -38,15 +47,20 @@ where
         }
     }
 
-    /// Initializes and verifies the radio in PTX mode.
+    /// Legacy diagnostic PTX initializer; use [`Self::initialize`] for data I/O.
     ///
-    /// Sets CE LOW, configures the radio, waits 2 ms for
-    /// stabilization, and verifies the critical TX registers.
+    /// Retained without a Rust deprecation attribute. Accepts Unknown or Ready,
+    /// including a currently listening driver. Drives CE low, disables EN_AA,
+    /// writes channel, rate/power and TX address, and sets PWR_UP/clears PRIM_RX.
+    /// Waits 2 ms and verifies those settings. Does not establish DPL, selective
+    /// NO_ACK, address width, RX address, or a particular CRC configuration.
+    /// Supply/POR and crystal assumptions match [`Self::initialize`].
     ///
-    /// Transitions to `Ready` on success or `Faulted` on failure.
-    /// A faulted driver cannot be reinitialized implicitly.
-    /// This legacy initializer leaves CE low in PTX standby; `transmit()`
-    /// requires RX mode established by `initialize()` on a new driver.
+    /// Success reports Ready in PTX standby with CE low: both [`Self::transmit`]
+    /// and [`Self::receive`] then return NotReady, and [`Self::initialize`] also
+    /// rejects Ready. Release resources and reconstruct for receive-first use.
+    /// Faulted is rejected without I/O; any attempted initialization failure
+    /// marks Faulted and invalidates the mode. This does not reset the radio.
     pub fn initialize_tx<D: DelayNs>(
         &mut self,
         config: &RadioConfig,
@@ -73,10 +87,6 @@ where
 
         result
     }
-
-    // ******************
-    // * Switch to mode *
-    // ******************
 
     fn switch_to_rx_inner<D: DelayNs>(
         &mut self,

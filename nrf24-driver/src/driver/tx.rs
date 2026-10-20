@@ -14,10 +14,19 @@ where
     ///
     /// On success, verifies that the TX FIFO is empty and clears TX_DS.
     ///
-    /// RX restoration is attempted after every TX result. Any TX or restoration
+    /// Sends with `W_TX_PAYLOAD_NOACK`; FEATURE.EN_DYN_ACK must remain enabled
+    /// by initialization. There is no ACK request or automatic retransmission.
+    /// Queued RX payloads and RX_DR are preserved; old TX payloads are discarded.
+    /// RX is unavailable during this synchronous operation.
+    ///
+    /// After a successful switch to TX, RX restoration is attempted for every TX result. Any TX or restoration
     /// failure transitions to `Faulted` and invalidates the known mode.
     /// If both fail, the original TX error is returned.
-    /// Invalid payload length preserves the current state.
+    /// A failure entering TX faults immediately without attempting restoration.
+    /// NotReady and invalid payload length perform no I/O and preserve state.
+    /// Successful return means Ready/RX after 130 µs settling. A restoration
+    /// failure can be returned even when the packet was already sent; blindly
+    /// retrying after external recovery can therefore duplicate application data.
     ///
     /// With automatic acknowledgments disabled, TX completion does not
     /// guarantee reception by another device.

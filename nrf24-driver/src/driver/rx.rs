@@ -14,7 +14,19 @@ where
     ///
     /// Any SPI failure faults the driver and invalidates the known mode. After
     /// an error the buffer may have been partially written; only use its data
-    /// on `Ok(Some(length))`. No GPIO changes, allocation, or waiting occurs.
+    /// on `Ok(Some(length))`. No GPIO changes, allocation, or wait for an RF
+    /// packet occurs; SPI transactions themselves are synchronous and may block.
+    ///
+    /// `Ok(None)` means the FIFO was empty at inspection; the buffer is untouched.
+    /// `Ok(Some(length))` writes only `buffer[..length]`, leaving its tail intact.
+    /// A 32-byte buffer accepts every supported payload; smaller buffers are
+    /// allowed if the oldest packet fits. An undersized buffer is untouched.
+    /// Reading the full payload under one CSN assertion removes that FIFO entry
+    /// when CSN rises, before RX_DR is cleared. If the subsequent clear fails,
+    /// the method returns an error although the packet was already consumed.
+    /// A failed payload transaction may also have consumed data; it is not retryable.
+    /// Invalid-width recovery discards every queued packet, including valid ones.
+    /// Peers must use NO_ACK: recovery does not coordinate with hardware ACK TX.
     ///
     /// Availability always comes from FIFO_STATUS, not RX_DR. Clearing RX_DR
     /// acknowledges a notification, not a FIFO entry. A concurrently arriving

@@ -1,5 +1,14 @@
 use crate::error::ConfigError;
 
+/// RF settings consumed by [`crate::Nrf24::initialize`].
+///
+/// The channel and address are required. The default data rate is 1 Mbps, the
+/// default nominal output power is minimum (−18 dBm), and outgoing packets use
+/// selective NO_ACK. Initialization fixes the address width at five bytes,
+/// CRC at one byte, and dynamic payloads at 1–32 bytes on pipe 0. The driver
+/// does not expose acknowledged TX, retries, other pipes, CRC selection, or
+/// an auto-acknowledgment setter. Builders change this value only; they do not
+/// reconfigure a radio that has already been initialized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RadioConfig {
     channel: u8,
@@ -10,12 +19,13 @@ pub struct RadioConfig {
 }
 
 impl RadioConfig {
-    /// Creates a Radio configuration.
+    /// Creates settings for RF channel `0..=125` (2400 + channel MHz).
     ///
-    /// `channel` must be in the range 0..=125.
-    /// `address` is the 5-byte RF destination address.
-    ///
-    /// Returns `ConfigError::InvalidChannel` for an invalid channel.
+    /// `address` is used for both TX and RX pipe 0, in SPI transfer order
+    /// (least-significant address byte first). All five-byte values are accepted;
+    /// callers must choose an appropriate address shared by their peers.
+    /// Defaults to [`DataRate::Mbps1`], [`TxPower::Min`], and NO_ACK transmission.
+    /// Returns [`ConfigError::InvalidChannel`] above 125 without hardware access.
     pub fn new(channel: u8, address: [u8; 5]) -> Result<Self, ConfigError> {
         if channel > 125 {
             return Err(ConfigError::InvalidChannel);
@@ -30,21 +40,26 @@ impl RadioConfig {
         })
     }
 
+    /// Returns the configured RF channel, in `0..=125`.
     pub const fn channel(&self) -> u8 {
         self.channel
     }
 
+    /// Returns the shared TX/RX pipe-0 address in SPI transfer order.
     pub const fn address(&self) -> [u8; 5] {
         self.address
     }
 
+    /// Returns the air data rate (default: 1 Mbps).
     pub const fn data_rate(&self) -> DataRate {
         self.data_rate
     }
 
     /// Whether transmitted packets request an ACK (currently always false).
     ///
-    /// ENAA_P0 remains enabled for DPL; selective NO_ACK suppresses packet ACKs.
+    /// ENAA_P0 remains enabled for DPL; selective NO_ACK suppresses ACKs for
+    /// outgoing packets. This is not a getter for EN_AA: incoming ACK-requesting
+    /// packets may still cause hardware ACKs. There is no auto-ACK setter.
     pub const fn auto_ack(&self) -> bool {
         self.auto_ack
     }
@@ -53,21 +68,32 @@ impl RadioConfig {
         self.data_rate.bits() | self.tx_power.bits()
     }
 
+    /// Selects the air data rate; communicating peers must use the same rate.
+    /// Default: 1 Mbps.
     pub fn with_data_rate(mut self, rate: DataRate) -> Self {
         self.data_rate = rate;
         self
     }
 
+    /// Selects the nominal chip TX power. Default: minimum (−18 dBm).
+    ///
+    /// This changes the nRF24L01+'s RF power field only. An external PA/LNA
+    /// module can have different output power; this does not change receiver
+    /// sensitivity.
     pub fn with_tx_power(mut self, power: TxPower) -> Self {
         self.tx_power = power;
         self
     }
 }
 
+/// Supported over-air bit rates, encoded in RF_SETUP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataRate {
+    /// 250 kbit/s; requires a plus-compatible radio at both ends.
     Kbps250,
+    /// 1 Mbit/s; the configuration default.
     Mbps1,
+    /// 2 Mbit/s.
     Mbps2,
 }
 
@@ -81,11 +107,16 @@ impl DataRate {
     }
 }
 
+/// Nominal nRF24L01+ output power; PA/LNA module output can differ.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxPower {
+    /// −18 dBm, the configuration default.
     Min,
+    /// −12 dBm.
     Low,
+    /// −6 dBm.
     High,
+    /// 0 dBm.
     Max,
 }
 
