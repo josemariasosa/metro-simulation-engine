@@ -58,6 +58,29 @@ The module uses a 2×4 pin connector with SPI, power and control signals.
 
 **Note:** MISO was originally connected to GPIO9, but this interfered with the ESP32-C3 boot process. Moving MISO to GPIO21 resolved the issue.
 
+### Planned wiring — Raspberry Pi Pico 2 W (RP2350)
+
+The station firmware (`station-rp2350`) will use the RP2350's SPI0 peripheral to communicate with the nRF24L01+ module.
+
+| RF module | Pico 2 W | Function |
+|---|---|---|
+| VCC | 3V3 | 3.3 V power supply |
+| GND | GND | Common ground |
+| CE | GP20 | Radio enable |
+| CSN | GP21 | Active-low chip select |
+| SCK | GP18 | SPI0 clock |
+| MOSI | GP19 | SPI0 TX |
+| MISO | GP16 | SPI0 RX |
+| IRQ | Not connected | Polling initially |
+
+**Notes:**
+
+- SPI0 will initially operate at 1 MHz, Mode 0.
+- CE and CSN will be controlled through GPIO.
+- GP16 is reserved for SPI0 RX and must not be used for the green LED from previous Pico experiments.
+- Wiring has not yet been physically validated.
+- The station will reuse the existing `nrf24-driver` crate through `embedded-hal` interfaces.
+
 ## Architecture
 
 The driver will use `embedded-hal` interfaces for SPI and GPIO operations.

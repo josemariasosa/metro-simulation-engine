@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = ["metro-core", "metro-bevy", "le-rove-protocol", "nrf24-driver"]
+members = ["metro-core", "metro-bevy", "le-rove-protocol", "nrf24-driver", "station-rp2350"]
