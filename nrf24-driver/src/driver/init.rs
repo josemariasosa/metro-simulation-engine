@@ -1,0 +1,536 @@
+use super::*;
+
+impl<SPI, CE> Nrf24<SPI, CE>
+where
+    SPI: SpiDevice,
+    CE: OutputPin,
+{
+    /// Creates a driver without accessing the hardware.
+    ///
+    /// The initial state is `RadioState::Unknown`.
+    pub fn new(spi: SPI, ce: CE) -> Self {
+        Self {
+            spi,
+            ce,
+            state: RadioState::Unknown,
+        }
+    }
+
+    /// Initializes and verifies the radio in PTX mode.
+    ///
+    /// Sets CE LOW, configures the radio, waits 2 ms for
+    /// stabilization, and verifies the critical TX registers.
+    ///
+    /// Transitions to `Ready` on success or `Faulted` on failure.
+    /// A faulted driver cannot be reinitialized implicitly.
+    pub fn initialize_tx<D: DelayNs>(
+        &mut self,
+        config: &RadioConfig,
+        delay: &mut D,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        // A faulted radio cannot be reinitialized implicitly.
+        if self.state == RadioState::Faulted {
+            return Err(InitError::NotReady);
+        }
+
+        let result = self.initialize_tx_inner(config, delay);
+
+        self.state = if result.is_ok() {
+            RadioState::Ready
+        } else {
+            RadioState::Faulted
+        };
+
+        result
+    }
+
+    fn initialize_rx_inner<D: DelayNs>(
+        &mut self,
+        config: &RadioConfig,
+        delay: &mut D,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        // 1. Disable radio activity during configuration.
+        self.ce.set_low().map_err(InitError::Pin)?;
+
+        // 2. Configure the radio as PRX.
+        self.configure_rx(config).map_err(InitError::Configure)?;
+
+        // 3. Allow the radio to power up and stabilize.
+        delay.delay_ms(2);
+
+        // 4. Verify hardware configuration.
+        self.verify_rx_config(config)?;
+
+        // 5. Begin listening.
+        self.ce.set_high().map_err(InitError::Pin)?;
+
+        // 6. Allow RX mode to settle.
+        delay.delay_us(130);
+
+        Ok(())
+    }
+
+    fn configure_tx(&mut self, config: &RadioConfig) -> Result<(), ConfigureError<SPI::Error>> {
+        // Disable Auto ACK.
+        self.write_register(EN_AA, 0x00)
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure RF channel.
+        self.write_register(RF_CH, config.channel())
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure data rate and TX output power.
+        self.write_register(RF_SETUP, config.rf_setup())
+            .map_err(ConfigureError::Spi)?;
+
+        // Configure destination address.
+        self.write_register_bytes(TX_ADDR, &config.address())
+            .map_err(ConfigureError::Register)?;
+
+        // Enable PTX mode.
+        let original = self.read_register(CONFIG).map_err(ConfigureError::Spi)?;
+
+        let tx_config = (original | PWR_UP) & !PRIM_RX;
+
+        self.write_register(CONFIG, tx_config)
+            .map_err(ConfigureError::Spi)?;
+
+        Ok(())
+    }
+
+    fn configure_rx(&mut self, config: &RadioConfig) -> Result<(), ConfigureError<SPI::Error>> {
+        // 1. Configure automatic acknowledgments.
+        self.write_register(EN_AA, if config.auto_ack() { ERX_P0 } else { 0 })
+            .map_err(ConfigureError::Spi)?;
+
+        // 2. Enable reception on pipe 0.
+        self.write_register(EN_RXADDR, ERX_P0)
+            .map_err(ConfigureError::Spi)?;
+
+        // 3. Configure the RF channel.
+        self.write_register(RF_CH, config.channel())
+            .map_err(ConfigureError::Spi)?;
+
+        // 4. Configure data rate and TX power.
+        self.write_register(RF_SETUP, config.rf_setup())
+            .map_err(ConfigureError::Spi)?;
+
+        // 5. Configure the address width to 5 bytes.
+        self.write_register(SETUP_AW, ADDRESS_WIDTH_5_BYTES)
+            .map_err(ConfigureError::Spi)?;
+
+        // 6. Configure the receive address.
+        self.write_register_bytes(RX_ADDR_P0, &config.address())
+            .map_err(ConfigureError::Register)?;
+
+        // 7. Enable Dynamic Payload Length on pipe 0.
+        self.write_register(FEATURE, EN_DPL)
+            .map_err(ConfigureError::Spi)?;
+
+        self.write_register(DYNPD, DPL_P0)
+            .map_err(ConfigureError::Spi)?;
+
+        // 8. Power up the radio in primary receiver mode.
+        let original = self.read_register(CONFIG).map_err(ConfigureError::Spi)?;
+
+        let rx_config = original | PWR_UP | PRIM_RX;
+
+        self.write_register(CONFIG, rx_config)
+            .map_err(ConfigureError::Spi)?;
+
+        Ok(())
+    }
+
+    fn initialize_tx_inner<D: DelayNs>(
+        &mut self,
+        config: &RadioConfig,
+        delay: &mut D,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        // 1. Keep the radio inactive during configuration.
+        self.ce.set_low().map_err(InitError::Pin)?;
+
+        // 2. Configure RF registers and power up in PTX mode.
+        self.configure_tx(config).map_err(InitError::Configure)?;
+
+        // 3. Wait for the radio to settle.
+        delay.delay_ms(2);
+
+        // 4. Verify the essential configuration.
+        self.verify_tx_config(config)?;
+
+        Ok(())
+    }
+
+    fn verify_tx_config(
+        &mut self,
+        config: &RadioConfig,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        const CONFIG: u8 = 0x00;
+        const EN_AA: u8 = 0x01;
+        const RF_CH: u8 = 0x05;
+        const RF_SETUP: u8 = 0x06;
+        const TX_ADDR: u8 = 0x10;
+
+        const PWR_UP: u8 = 1 << 1;
+        const PRIM_RX: u8 = 1 << 0;
+
+        let read = |radio: &mut Self, register| {
+            radio
+                .read_register(register)
+                .map_err(|error| InitError::Configure(ConfigureError::Spi(error)))
+        };
+
+        let config_reg = read(self, CONFIG)?;
+        let en_aa = read(self, EN_AA)?;
+        let channel = read(self, RF_CH)?;
+        let rf_setup = read(self, RF_SETUP)?;
+
+        let mut address = [0u8; 5];
+
+        self.read_register_bytes(TX_ADDR, &mut address)
+            .map_err(|error| InitError::Configure(ConfigureError::Register(error)))?;
+
+        if config_reg & (PWR_UP | PRIM_RX) != PWR_UP
+            || en_aa != 0
+            || channel != config.channel()
+            || rf_setup != 0
+            || address != config.address()
+        {
+            return Err(InitError::VerificationFailed);
+        }
+
+        Ok(())
+    }
+
+    fn verify_rx_config(
+        &mut self,
+        config: &RadioConfig,
+    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+        let read = |radio: &mut Self, register| {
+            radio
+                .read_register(register)
+                .map_err(|error| InitError::Configure(ConfigureError::Spi(error)))
+        };
+
+        let config_reg = read(self, CONFIG)?;
+        let en_aa = read(self, EN_AA)?;
+        let en_rxaddr = read(self, EN_RXADDR)?;
+        let channel = read(self, RF_CH)?;
+        let rf_setup = read(self, RF_SETUP)?;
+        let address_width = read(self, SETUP_AW)?;
+        let feature = read(self, FEATURE)?;
+        let dynpd = read(self, DYNPD)?;
+
+        let mut address = [0u8; 5];
+
+        self.read_register_bytes(RX_ADDR_P0, &mut address)
+            .map_err(|error| InitError::Configure(ConfigureError::Register(error)))?;
+
+        let expected_ack = if config.auto_ack() { ERX_P0 } else { 0 };
+
+        if config_reg & (PWR_UP | PRIM_RX) != (PWR_UP | PRIM_RX)
+            || en_aa != expected_ack
+            || en_rxaddr != ERX_P0
+            || channel != config.channel()
+            || rf_setup != config.rf_setup()
+            || address_width != ADDRESS_WIDTH_5_BYTES
+            || feature & EN_DPL == 0
+            || dynpd & DPL_P0 == 0
+            || address != config.address()
+        {
+            return Err(InitError::VerificationFailed);
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::vec;
+
+    use super::*;
+
+    use embedded_hal_mock::eh1::delay::NoopDelay;
+    use embedded_hal_mock::eh1::digital::{Mock as PinMock, State, Transaction as PinTransaction};
+    use embedded_hal_mock::eh1::spi::{Mock as SpiMock, Transaction as SpiTransaction};
+
+    use crate::error::ConfigError;
+
+    #[test]
+    fn accept_valid_tx_config() {
+        let config = RadioConfig::new(50, [0xE7; 5]);
+
+        assert!(config.is_ok());
+    }
+
+    #[test]
+    fn reject_invalid_tx_channel() {
+        let config = RadioConfig::new(126, [0xE7; 5]);
+
+        assert_eq!(config, Err(ConfigError::InvalidChannel));
+    }
+
+    #[test]
+    fn new_radio_starts_in_unknown_state() {
+        let spi = SpiMock::new(&[]);
+        let ce = PinMock::new(&[]);
+
+        let radio = Nrf24::new(spi, ce);
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn configure_tx_writes_expected_registers() {
+        let expectations = [
+            // Disable Auto ACK.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x21, 0x00], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // Set RF channel to 50.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x25, 0x32], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 1 Mbps, minimum output power.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x26, 0x00], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // Set TX address.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            SpiTransaction::transaction_end(),
+            // Read CONFIG (original = 0x08).
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x08]),
+            SpiTransaction::transaction_end(),
+            // Write CONFIG = 0x0A.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x20, 0x0A], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&[]);
+        let mut radio = Nrf24::new(spi, ce);
+
+        let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
+
+        radio.configure_tx(&config).unwrap();
+
+        let (mut spi, mut ce) = radio.release();
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn initialize_tx_transitions_from_unknown_to_ready() {
+        let expectations = [
+            // 1. Disable Auto ACK.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x21, 0x00], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 2. RF_CH = 50.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x25, 0x32], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 3. RF_SETUP = 0x00.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x26, 0x00], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 4. TX_ADDR = [0xE7; 5].
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            SpiTransaction::transaction_end(),
+            // 5. Read original CONFIG = 0x08.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x08]),
+            SpiTransaction::transaction_end(),
+            // 6. Power up in PTX mode: CONFIG = 0x0A.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x20, 0x0A], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 7. Verify CONFIG.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x0A]),
+            SpiTransaction::transaction_end(),
+            // 8. Verify EN_AA.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x01, 0xFF], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 9. Verify RF_CH.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x05, 0xFF], vec![0x0E, 0x32]),
+            SpiTransaction::transaction_end(),
+            // 10. Verify RF_SETUP.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x06, 0xFF], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 11. Verify TX_ADDR.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x10]),
+            SpiTransaction::read_vec(vec![0xE7; 5]),
+            SpiTransaction::transaction_end(),
+        ];
+
+        let ce_expectations = [PinTransaction::set(State::Low)];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        radio.initialize_tx(&config, &mut delay).unwrap();
+
+        assert_eq!(radio.state(), RadioState::Ready);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn initialize_tx_verification_failure_sets_faulted() {
+        let expectations = [
+            // 1. Disable Auto ACK.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x21, 0x00], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 2. RF_CH = 50.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x25, 0x32], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 3. RF_SETUP = 0x00.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x26, 0x00], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 4. TX_ADDR = [0xE7; 5].
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            SpiTransaction::transaction_end(),
+            // 5. Read original CONFIG = 0x08.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x08]),
+            SpiTransaction::transaction_end(),
+            // 6. Power up in PTX mode: CONFIG = 0x0A.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x20, 0x0A], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 7. Verify CONFIG.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0x0E, 0x0A]),
+            SpiTransaction::transaction_end(),
+            // 8. Verify EN_AA.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x01, 0xFF], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 9. Expected channel 50, but hardware reports channel 42.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x05, 0xFF], vec![0x0E, 0x2A]),
+            SpiTransaction::transaction_end(),
+            // 10. Verify RF_SETUP.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x06, 0xFF], vec![0x0E, 0x00]),
+            SpiTransaction::transaction_end(),
+            // 11. Verify TX_ADDR.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x10]),
+            SpiTransaction::read_vec(vec![0xE7; 5]),
+            SpiTransaction::transaction_end(),
+        ];
+
+        let ce_expectations = [PinTransaction::set(State::Low)];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&ce_expectations);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let mut delay = NoopDelay::new();
+
+        let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
+
+        assert_eq!(radio.state(), RadioState::Unknown);
+
+        let result = radio.initialize_tx(&config, &mut delay);
+
+        assert_eq!(result, Err(InitError::VerificationFailed));
+
+        assert_eq!(radio.state(), RadioState::Faulted);
+
+        let (mut spi, mut ce) = radio.release();
+
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
+    fn configure_rx_writes_expected_registers() {
+        let expectations = [
+            // Disable Auto ACK.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x21, 0x00], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // Enable RX pipe 0.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x22, 0x01], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // RF channel = 50.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x25, 0x32], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // RF_SETUP = 1 Mbps, minimum power.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x26, 0x00], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // SETUP_AW = 5-byte address width.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x23, 0x03], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // RX_ADDR_P0 = [0xE7; 5].
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x2A, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            SpiTransaction::transaction_end(),
+            // FEATURE = EN_DPL.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x3D, 0x04], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // DYNPD = DPL_P0.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x3C, 0x01], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+            // Read CONFIG: return 0x08.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0x00, 0x08]),
+            SpiTransaction::transaction_end(),
+            // Write CONFIG = 0x08 | PWR_UP | PRIM_RX.
+            SpiTransaction::transaction_start(),
+            SpiTransaction::transfer_in_place(vec![0x20, 0x0B], vec![0x00, 0x00]),
+            SpiTransaction::transaction_end(),
+        ];
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&[]);
+
+        let mut radio = Nrf24::new(spi, ce);
+        let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
+
+        assert_eq!(radio.configure_rx(&config), Ok(()));
+
+        let (mut spi, mut ce) = radio.release();
+        spi.done();
+        ce.done();
+    }
+}

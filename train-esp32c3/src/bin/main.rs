@@ -17,8 +17,8 @@ use esp_hal::{
     gpio::{Level, Output, OutputConfig},
     main,
     spi::{
-        master::{Config as SpiConfig, Spi},
         Mode,
+        master::{Config as SpiConfig, Spi},
     },
     time::{Duration, Rate},
 };
@@ -29,7 +29,7 @@ use le_rove_protocol::{
     message::{Event, Location, Message, StopReason},
 };
 use log::info;
-use nrf24_driver::{Nrf24, TxConfig};
+use nrf24_driver::{Nrf24, RadioConfig};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -40,7 +40,7 @@ where
     SPI::Error: core::fmt::Debug,
     CE::Error: core::fmt::Debug,
 {
-    let config = TxConfig::new(50, [0xE7; 5]).unwrap();
+    let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
 
     radio.initialize_tx(&config, delay).unwrap();
 
