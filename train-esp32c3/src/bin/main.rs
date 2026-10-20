@@ -42,7 +42,7 @@ where
 {
     let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
 
-    radio.initialize_tx(&config, delay).unwrap();
+    radio.initialize(&config, delay).unwrap();
 
     info!("Radio initialized: {:?}", radio.state());
 }
