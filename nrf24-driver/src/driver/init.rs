@@ -231,6 +231,10 @@ where
         self.write_register_bytes(RX_ADDR_P0, &config.address())
             .map_err(ConfigureError::Register)?;
 
+        // Keep TX_ADDR equal to RX_ADDR_P0 so a later RX -> TX switch is ready.
+        self.write_register_bytes(TX_ADDR, &config.address())
+            .map_err(ConfigureError::Register)?;
+
         // 7. Enable Dynamic Payload Length on pipe 0.
         self.write_register(FEATURE, EN_DPL)
             .map_err(ConfigureError::Spi)?;
@@ -334,6 +338,11 @@ where
         self.read_register_bytes(RX_ADDR_P0, &mut address)
             .map_err(|error| InitError::Configure(ConfigureError::Register(error)))?;
 
+        let mut tx_address = [0u8; 5];
+
+        self.read_register_bytes(TX_ADDR, &mut tx_address)
+            .map_err(|error| InitError::Configure(ConfigureError::Register(error)))?;
+
         let expected_ack = if config.auto_ack() { ERX_P0 } else { 0 };
 
         if config_reg & (PWR_UP | PRIM_RX) != (PWR_UP | PRIM_RX)
@@ -345,6 +354,7 @@ where
             || feature & EN_DPL == 0
             || dynpd & DPL_P0 == 0
             || address != config.address()
+            || tx_address != config.address()
         {
             return Err(InitError::VerificationFailed);
         }
@@ -400,6 +410,10 @@ mod tests {
             SpiTransaction::transaction_start(),
             SpiTransaction::write_vec(vec![0x2A, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
             SpiTransaction::transaction_end(),
+            // TX_ADDR = [0xE7; 5].
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
+            SpiTransaction::transaction_end(),
             // FEATURE = EN_DPL.
             SpiTransaction::transaction_start(),
             SpiTransaction::transfer_in_place(vec![0x3D, 0x04], vec![0x00, 0x00]),
@@ -422,6 +436,13 @@ mod tests {
     }
 
     fn verify_rx_expectations(config_value: u8) -> Vec<SpiTransaction<u8>> {
+        verify_rx_expectations_with_tx_addr(config_value, [0xE7; 5])
+    }
+
+    fn verify_rx_expectations_with_tx_addr(
+        config_value: u8,
+        tx_addr: [u8; 5],
+    ) -> Vec<SpiTransaction<u8>> {
         let registers = [
             (CONFIG, config_value),
             (EN_AA, 0x00),
@@ -448,6 +469,14 @@ mod tests {
             SpiTransaction::transaction_start(),
             SpiTransaction::write_vec(vec![RX_ADDR_P0]),
             SpiTransaction::read_vec(vec![0xE7; 5]),
+            SpiTransaction::transaction_end(),
+        ]);
+
+        // read_register_bytes(TX_ADDR, ...)
+        expectations.extend([
+            SpiTransaction::transaction_start(),
+            SpiTransaction::write_vec(vec![TX_ADDR]),
+            SpiTransaction::read_vec(tx_addr.to_vec()),
             SpiTransaction::transaction_end(),
         ]);
 
@@ -689,6 +718,26 @@ mod tests {
     }
 
     #[test]
+    fn verify_rx_rejects_wrong_tx_addr() {
+        let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
+        let expectations = verify_rx_expectations_with_tx_addr(0x0B, [0xC2; 5]);
+
+        let spi = SpiMock::new(&expectations);
+        let ce = PinMock::new(&[]);
+
+        let mut radio = Nrf24::new(spi, ce);
+
+        assert_eq!(
+            radio.verify_rx_config(&config),
+            Err(InitError::VerificationFailed)
+        );
+
+        let (mut spi, mut ce) = radio.release();
+        spi.done();
+        ce.done();
+    }
+
+    #[test]
     fn initialize_rx_starts_listening_after_verification() {
         let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
 
@@ -922,7 +971,7 @@ mod tests {
 
         let ce = PinMock::new(&[PinTransaction::set(PinState::Low)]);
 
-        let mut delay = DelayMock::new(&[DelayTransaction::delay_us(RADIO_SETTLING_US)]);
+        let mut delay = DelayMock::new(&[]);
 
         let mut radio = Nrf24::new(spi, ce);
 
