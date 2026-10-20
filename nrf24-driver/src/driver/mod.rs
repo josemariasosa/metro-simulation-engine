@@ -21,6 +21,7 @@ pub struct Nrf24<SPI, CE> {
     spi: SPI,
     ce: CE,
     state: RadioState,
+    mode: Option<OperatingMode>,
 }
 
 impl<SPI, CE> Nrf24<SPI, CE>
@@ -28,6 +29,18 @@ where
     SPI: SpiDevice,
     CE: OutputPin,
 {
+    /// Creates a driver without accessing the hardware.
+    ///
+    /// The initial state is `RadioState::Unknown`.
+    pub fn new(spi: SPI, ce: CE) -> Self {
+        Self {
+            spi,
+            ce,
+            state: RadioState::Unknown,
+            mode: None,
+        }
+    }
+
     /// Consumes the driver and returns ownership of SPI and CE.
     ///
     /// Does not reset or power down the radio.
@@ -52,4 +65,10 @@ pub enum RadioState {
 
     /// A critical error occurred; further transmissions are blocked.
     Faulted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OperatingMode {
+    Rx,
+    Tx,
 }

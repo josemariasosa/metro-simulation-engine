@@ -44,3 +44,21 @@ pub(crate) const MAX_RT: u8 = 1 << 4;
 
 // FIFO_STATUS bits
 pub(crate) const TX_EMPTY: u8 = 1 << 4;
+
+/// Power-up delay in milliseconds.
+///
+/// The nRF24L01+ requires up to 1.5 ms to transition from Power Down
+/// to Standby-I. We use 2 ms to provide a small safety margin.
+pub(crate) const POWER_UP_DELAY_MS: u32 = 2;
+
+/// Radio settling time in microseconds.
+///
+/// The nRF24L01+ requires up to 130 µs to transition from
+/// Standby-I to an active RX or TX state.
+pub(crate) const RADIO_SETTLING_US: u32 = 130;
+
+/// Minimum CE pulse duration in microseconds.
+///
+/// In PTX mode, CE must remain HIGH for at least 10 µs
+/// to initiate a transmission.
+pub(crate) const MIN_CE_PULSE_US: u32 = 10;
