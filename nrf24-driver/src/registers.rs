@@ -38,7 +38,6 @@ pub(crate) const EN_DPL: u8 = 1 << 2;
 pub(crate) const ADDRESS_WIDTH_5_BYTES: u8 = 0x03;
 
 // STATUS bits
-pub(crate) const RX_DR: u8 = 1 << 6;
 pub(crate) const TX_DS: u8 = 1 << 5;
 pub(crate) const MAX_RT: u8 = 1 << 4;
 
@@ -47,8 +46,9 @@ pub(crate) const TX_EMPTY: u8 = 1 << 4;
 
 /// Power-up delay in milliseconds.
 ///
-/// The nRF24L01+ requires up to 1.5 ms to transition from Power Down
-/// to Standby-I. We use 2 ms to provide a small safety margin.
+/// With the datasheet's recommended crystal (Ls < 30 mH), power down
+/// to standby-I takes up to 1.5 ms. The 2 ms delay assumes that crystal;
+/// higher-inductance crystals require a longer startup (Table 16).
 pub(crate) const POWER_UP_DELAY_MS: u32 = 2;
 
 /// Radio settling time in microseconds.

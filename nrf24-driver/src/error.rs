@@ -30,6 +30,7 @@ pub enum TxError<SpiError, PinError> {
     Timeout,
     MaxRetries,
     FifoNotEmpty,
+    ModeSwitch(InitError<SpiError, PinError>),
 }
 
 #[derive(Debug, PartialEq, Eq)]

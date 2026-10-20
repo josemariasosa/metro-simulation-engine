@@ -11,9 +11,9 @@ use crate::config::RadioConfig;
 use crate::error::{ConfigureError, InitError, PayloadError, RegisterError, TxError};
 use crate::registers::*;
 
-// nRF24L01+ driver owning the SPI device and CE output pin.
+/// nRF24L01+ driver owning the SPI device and CE output pin.
 ///
-/// Starts in `RadioState::Unknown`. Call `initialize_tx()`
+/// Starts in `RadioState::Unknown`. Call `initialize()`
 /// before attempting to transmit.
 ///
 /// SPI chip-select (CSN) is managed by the supplied `SpiDevice`.
@@ -60,7 +60,7 @@ pub enum RadioState {
     /// Hardware has not completed verified initialization.
     Unknown,
 
-    /// TX initialization succeeded and transmissions are permitted.
+    /// Verified initialization succeeded; the operating mode is known.
     Ready,
 
     /// A critical error occurred; further transmissions are blocked.

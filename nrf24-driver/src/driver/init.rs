@@ -9,7 +9,7 @@ where
     ///
     /// On success, the radio enters RX mode and is ready to receive.
     ///
-    /// Transmissions will eventually switch temporarily to TX and
+    /// Transmissions switch temporarily to TX and
     /// restore RX automatically.
     ///
     /// Any initialization failure transitions the driver to Faulted.
@@ -45,6 +45,8 @@ where
     ///
     /// Transitions to `Ready` on success or `Faulted` on failure.
     /// A faulted driver cannot be reinitialized implicitly.
+    /// This legacy initializer leaves CE low in PTX standby; `transmit()`
+    /// requires RX mode established by `initialize()` on a new driver.
     pub fn initialize_tx<D: DelayNs>(
         &mut self,
         config: &RadioConfig,
@@ -61,6 +63,12 @@ where
             RadioState::Ready
         } else {
             RadioState::Faulted
+        };
+
+        self.mode = if result.is_ok() {
+            Some(OperatingMode::Tx)
+        } else {
+            None
         };
 
         result
@@ -90,7 +98,7 @@ where
         Ok(())
     }
 
-    fn switch_to_rx<D: DelayNs>(
+    pub(super) fn switch_to_rx<D: DelayNs>(
         &mut self,
         delay: &mut D,
     ) -> Result<(), InitError<SPI::Error, CE::Error>> {
@@ -113,31 +121,27 @@ where
         }
     }
 
-    fn switch_to_tx_inner<D: DelayNs>(
-        &mut self,
-        delay: &mut D,
-    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+    fn switch_to_tx_inner(&mut self) -> Result<(), InitError<SPI::Error, CE::Error>> {
         self.ce.set_low().map_err(InitError::Pin)?;
 
         let config = self
             .read_register(CONFIG)
             .map_err(|e| InitError::Configure(ConfigureError::Spi(e)))?;
 
+        // CE is low: this selects PTX in standby-I. TX settling starts
+        // with the CE pulse, not with this register write (datasheet §6.1.7).
         self.write_register(CONFIG, config & !PRIM_RX)
             .map_err(|e| InitError::Configure(ConfigureError::Spi(e)))?;
 
         Ok(())
     }
 
-    fn switch_to_tx<D: DelayNs>(
-        &mut self,
-        delay: &mut D,
-    ) -> Result<(), InitError<SPI::Error, CE::Error>> {
+    pub(super) fn switch_to_tx(&mut self) -> Result<(), InitError<SPI::Error, CE::Error>> {
         if self.state != RadioState::Ready || self.mode != Some(OperatingMode::Rx) {
             return Err(InitError::NotReady);
         }
 
-        let result = self.switch_to_tx_inner(delay);
+        let result = self.switch_to_tx_inner();
 
         match result {
             Ok(()) => {
@@ -618,6 +622,7 @@ mod tests {
 
         radio.initialize_tx(&config, &mut delay).unwrap();
 
+        assert_eq!(radio.mode, Some(OperatingMode::Tx));
         assert_eq!(radio.state(), RadioState::Ready);
 
         let (mut spi, mut ce) = radio.release();
@@ -979,7 +984,7 @@ mod tests {
         radio.state = RadioState::Ready;
         radio.mode = Some(OperatingMode::Rx);
 
-        assert_eq!(radio.switch_to_tx(&mut delay), Ok(()));
+        assert_eq!(radio.switch_to_tx(), Ok(()));
 
         assert_eq!(radio.state(), RadioState::Ready);
         assert_eq!(radio.mode, Some(OperatingMode::Tx));
@@ -1028,7 +1033,7 @@ mod tests {
         radio.state = RadioState::Ready;
         radio.mode = Some(OperatingMode::Tx);
 
-        assert_eq!(radio.switch_to_tx(&mut delay), Err(InitError::NotReady));
+        assert_eq!(radio.switch_to_tx(), Err(InitError::NotReady));
 
         assert_eq!(radio.state(), RadioState::Ready);
         assert_eq!(radio.mode, Some(OperatingMode::Tx));
@@ -1076,7 +1081,7 @@ mod tests {
         radio.state = RadioState::Ready;
         radio.mode = Some(OperatingMode::Rx);
 
-        let result = radio.switch_to_tx(&mut delay);
+        let result = radio.switch_to_tx();
 
         assert!(matches!(result, Err(InitError::Pin(_))));
 

@@ -10,13 +10,10 @@
 //!
 //! Built on `embedded-hal` SPI, GPIO, and delay traits.
 //!
-//! Currently supports PTX (transmit) mode only, with:
-//! - 1 Mbps data rate and minimum RF output power.
-//! - Auto ACK disabled.
-//! - Configurable RF channel and 5-byte TX address.
-//! - Verified initialization and fail-stop TX state management.
-//!
-//! RX support is not implemented yet.
+//! Initializes in RX mode and automatically restores RX after transmission.
+//! Supports configurable RF settings and optional automatic acknowledgments.
+//! Initialization is verified and transmission errors use fail-stop handling.
+//! Reading received payloads is not implemented yet.
 
 #![no_std]
 
