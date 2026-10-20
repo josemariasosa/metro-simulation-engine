@@ -21,6 +21,7 @@ pub(crate) const STATUS: u8 = 0x07;
 pub(crate) const RX_ADDR_P0: u8 = 0x0A;
 pub(crate) const TX_ADDR: u8 = 0x10;
 pub(crate) const FIFO_STATUS: u8 = 0x17;
+pub(crate) const RX_EMPTY: u8 = 1 << 0;
 
 pub(crate) const DYNPD: u8 = 0x1C;
 pub(crate) const FEATURE: u8 = 0x1D;
