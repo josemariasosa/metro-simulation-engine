@@ -1,19 +1,11 @@
-// //! Minimal, platform-independent, no_std driver
-// //! for nRF24L01+ compatible transceivers.
-
-// #![no_std]
-
-// #[cfg(test)]
-// mod tests;
-
 //! Minimal `no_std` driver for the nRF24L01+ transceiver.
 //!
 //! Built on `embedded-hal` SPI, GPIO, and delay traits.
 //!
 //! Initializes in RX mode and automatically restores RX after transmission.
-//! Supports configurable RF settings and optional automatic acknowledgments.
+//! Supports configurable RF settings and dynamic payloads with selective NO_ACK.
 //! Initialization is verified and transmission errors use fail-stop handling.
-//! Reading received payloads is not implemented yet.
+//! Receives one dynamic payload per non-blocking poll into a caller-owned buffer.
 
 #![no_std]
 
@@ -24,4 +16,6 @@ mod registers;
 
 pub use config::{DataRate, RadioConfig, TxPower};
 pub use driver::{Nrf24, RadioState};
-pub use error::{ConfigError, ConfigureError, InitError, PayloadError, RegisterError, TxError};
+pub use error::{
+    ConfigError, ConfigureError, InitError, PayloadError, RegisterError, RxError, TxError,
+};

@@ -72,6 +72,7 @@ where
 
     /// Loads a payload of 1..=32 bytes into the TX FIFO.
     ///
+    /// Uses selective NO_ACK; requires FEATURE.EN_DYN_ACK from initialize().
     /// Does not trigger transmission.
     pub(super) fn write_payload(&mut self, payload: &[u8]) -> Result<(), PayloadError<SPI::Error>> {
         if payload.is_empty() || payload.len() > 32 {
@@ -80,7 +81,7 @@ where
 
         let mut buffer = [0u8; 33];
 
-        buffer[0] = W_TX_PAYLOAD;
+        buffer[0] = W_TX_PAYLOAD_NOACK;
         buffer[1..1 + payload.len()].copy_from_slice(payload);
 
         self.spi
@@ -155,7 +156,7 @@ mod tests {
         ];
 
         let expected = [
-            0xA0, 0x01, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x04,
+            0xB0, 0x01, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x04,
             0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 

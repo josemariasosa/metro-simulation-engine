@@ -211,8 +211,9 @@ where
     }
 
     fn configure_rx(&mut self, config: &RadioConfig) -> Result<(), ConfigureError<SPI::Error>> {
-        // 1. Configure automatic acknowledgments.
-        self.write_register(EN_AA, if config.auto_ack() { ERX_P0 } else { 0 })
+        // DPL requires ENAA_P0. Packets sent with W_TX_PAYLOAD_NOACK
+        // suppress acknowledgments without disabling dynamic payload framing.
+        self.write_register(EN_AA, ERX_P0)
             .map_err(ConfigureError::Spi)?;
 
         // 2. Enable reception on pipe 0.
@@ -240,7 +241,7 @@ where
             .map_err(ConfigureError::Register)?;
 
         // 7. Enable Dynamic Payload Length on pipe 0.
-        self.write_register(FEATURE, EN_DPL)
+        self.write_register(FEATURE, EN_DPL | EN_DYN_ACK)
             .map_err(ConfigureError::Spi)?;
 
         self.write_register(DYNPD, DPL_P0)
@@ -249,7 +250,8 @@ where
         // 8. Power up the radio in primary receiver mode.
         let original = self.read_register(CONFIG).map_err(ConfigureError::Spi)?;
 
-        let rx_config = original | PWR_UP | PRIM_RX;
+        // Use the same explicit one-byte CRC on both peers, even after MCU-only reset.
+        let rx_config = (original | EN_CRC | PWR_UP | PRIM_RX) & !CRCO;
 
         self.write_register(CONFIG, rx_config)
             .map_err(ConfigureError::Spi)?;
@@ -347,15 +349,13 @@ where
         self.read_register_bytes(TX_ADDR, &mut tx_address)
             .map_err(|error| InitError::Configure(ConfigureError::Register(error)))?;
 
-        let expected_ack = if config.auto_ack() { ERX_P0 } else { 0 };
-
-        if config_reg & (PWR_UP | PRIM_RX) != (PWR_UP | PRIM_RX)
-            || en_aa != expected_ack
+        if config_reg & (EN_CRC | CRCO | PWR_UP | PRIM_RX) != (EN_CRC | PWR_UP | PRIM_RX)
+            || en_aa != ERX_P0
             || en_rxaddr != ERX_P0
             || channel != config.channel()
             || rf_setup != config.rf_setup()
             || address_width != ADDRESS_WIDTH_5_BYTES
-            || feature & EN_DPL == 0
+            || feature != (EN_DPL | EN_DYN_ACK)
             || dynpd & DPL_P0 == 0
             || address != config.address()
             || tx_address != config.address()
@@ -390,9 +390,9 @@ mod tests {
 
     fn configure_rx_expectations() -> Vec<SpiTransaction<u8>> {
         let expectations = [
-            // Disable Auto ACK.
+            // Enable pipe 0 Enhanced ShockBurst; TX packets select NO_ACK.
             SpiTransaction::transaction_start(),
-            SpiTransaction::transfer_in_place(vec![0x21, 0x00], vec![0x00, 0x00]),
+            SpiTransaction::transfer_in_place(vec![0x21, 0x01], vec![0x00, 0x00]),
             SpiTransaction::transaction_end(),
             // Enable RX pipe 0.
             SpiTransaction::transaction_start(),
@@ -418,9 +418,9 @@ mod tests {
             SpiTransaction::transaction_start(),
             SpiTransaction::write_vec(vec![0x30, 0xE7, 0xE7, 0xE7, 0xE7, 0xE7]),
             SpiTransaction::transaction_end(),
-            // FEATURE = EN_DPL.
+            // FEATURE = EN_DPL | EN_DYN_ACK.
             SpiTransaction::transaction_start(),
-            SpiTransaction::transfer_in_place(vec![0x3D, 0x04], vec![0x00, 0x00]),
+            SpiTransaction::transfer_in_place(vec![0x3D, 0x05], vec![0x00, 0x00]),
             SpiTransaction::transaction_end(),
             // DYNPD = DPL_P0.
             SpiTransaction::transaction_start(),
@@ -449,12 +449,12 @@ mod tests {
     ) -> Vec<SpiTransaction<u8>> {
         let registers = [
             (CONFIG, config_value),
-            (EN_AA, 0x00),
+            (EN_AA, 0x01),
             (EN_RXADDR, 0x01),
             (RF_CH, 0x32),
             (RF_SETUP, 0x00),
             (SETUP_AW, 0x03),
-            (FEATURE, 0x04),
+            (FEATURE, 0x05),
             (DYNPD, 0x01),
         ];
 
@@ -1093,5 +1093,44 @@ mod tests {
         spi.done();
         ce.done();
         delay.done();
+    }
+
+    #[test]
+    fn configure_rx_normalizes_crc_after_mcu_only_reset() {
+        for original in [0x00, 0x0C, 0x7C] {
+            let mut e = configure_rx_expectations();
+            let n = e.len();
+            e[n - 5] = SpiTransaction::transfer_in_place(vec![0x00, 0xFF], vec![0, original]);
+            e[n - 2] = SpiTransaction::transfer_in_place(
+                vec![0x20, (original | 0x0B) & !0x04],
+                vec![0, 0],
+            );
+            let mut radio = Nrf24::new(SpiMock::new(&e), PinMock::new(&[]));
+            radio
+                .configure_rx(&RadioConfig::new(50, [0xE7; 5]).unwrap())
+                .unwrap();
+            let (mut spi, mut ce) = radio.release();
+            spi.done();
+            ce.done();
+        }
+    }
+
+    #[test]
+    fn verify_rx_rejects_wrong_crc_and_disabled_dpl() {
+        for (index, register, value) in
+            [(0, 0x00, 0x03), (0, 0x00, 0x0F), (6, 0x1D, 0), (7, 0x1C, 0)]
+        {
+            let mut e = verify_rx_expectations(0x0B);
+            e[index * 3 + 1] =
+                SpiTransaction::transfer_in_place(vec![register, 0xFF], vec![0, value]);
+            let mut radio = Nrf24::new(SpiMock::new(&e), PinMock::new(&[]));
+            assert_eq!(
+                radio.verify_rx_config(&RadioConfig::new(50, [0xE7; 5]).unwrap()),
+                Err(InitError::VerificationFailed)
+            );
+            let (mut spi, mut ce) = radio.release();
+            spi.done();
+            ce.done();
+        }
     }
 }

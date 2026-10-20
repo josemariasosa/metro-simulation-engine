@@ -5,7 +5,11 @@ pub(crate) const R_REGISTER: u8 = 0x00;
 pub(crate) const W_REGISTER: u8 = 0x20;
 pub(crate) const REGISTER_MASK: u8 = 0x1F;
 
-pub(crate) const W_TX_PAYLOAD: u8 = 0xA0;
+pub(crate) const R_RX_PL_WID: u8 = 0x60;
+pub(crate) const R_RX_PAYLOAD: u8 = 0x61;
+pub(crate) const FLUSH_RX: u8 = 0xE2;
+
+pub(crate) const W_TX_PAYLOAD_NOACK: u8 = 0xB0;
 pub(crate) const FLUSH_TX: u8 = 0xE1;
 
 // Registers
@@ -27,18 +31,22 @@ pub(crate) const DYNPD: u8 = 0x1C;
 pub(crate) const FEATURE: u8 = 0x1D;
 
 // CONFIG bits
+pub(crate) const EN_CRC: u8 = 1 << 3;
+pub(crate) const CRCO: u8 = 1 << 2;
 pub(crate) const PWR_UP: u8 = 1 << 1;
 pub(crate) const PRIM_RX: u8 = 1 << 0;
 
 // RX configuration bits
 pub(crate) const ERX_P0: u8 = 1 << 0;
 pub(crate) const DPL_P0: u8 = 1 << 0;
+pub(crate) const EN_DYN_ACK: u8 = 1 << 0;
 pub(crate) const EN_DPL: u8 = 1 << 2;
 
 // Address width
 pub(crate) const ADDRESS_WIDTH_5_BYTES: u8 = 0x03;
 
 // STATUS bits
+pub(crate) const RX_DR: u8 = 1 << 6;
 pub(crate) const TX_DS: u8 = 1 << 5;
 pub(crate) const MAX_RT: u8 = 1 << 4;
 

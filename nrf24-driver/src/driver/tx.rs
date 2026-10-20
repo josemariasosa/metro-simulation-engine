@@ -229,7 +229,7 @@ mod tests {
             SpiTransaction::transaction_end(),
             // Write three-byte payload.
             SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec(vec![0xA0, 0x01, 0x02, 0x03]),
+            SpiTransaction::write_vec(vec![0xB0, 0x01, 0x02, 0x03]),
             SpiTransaction::transaction_end(),
             // STATUS: TX_DS = 1
             SpiTransaction::transaction_start(),
@@ -296,7 +296,7 @@ mod tests {
             SpiTransaction::transaction_end(),
             // Load payload.
             SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec(vec![0xA0, 0x01, 0x02, 0x03]),
+            SpiTransaction::write_vec(vec![0xB0, 0x01, 0x02, 0x03]),
             SpiTransaction::transaction_end(),
             // STATUS: MAX_RT = 1.
             SpiTransaction::transaction_start(),
@@ -357,7 +357,7 @@ mod tests {
             SpiTransaction::transaction_end(),
             // Load payload
             SpiTransaction::transaction_start(),
-            SpiTransaction::write_vec(vec![0xA0, 0x01]),
+            SpiTransaction::write_vec(vec![0xB0, 0x01]),
             SpiTransaction::transaction_end(),
         ];
 
@@ -660,7 +660,7 @@ mod tests {
                     SpiTransaction::transfer_in_place(vec![0x27, 0x30], vec![0, 0]),
                     SpiTransaction::transaction_end(),
                     SpiTransaction::transaction_start(),
-                    SpiTransaction::write_vec(vec![0xA0, 1]),
+                    SpiTransaction::write_vec(vec![0xB0, 1]),
                     SpiTransaction::transaction_end(),
                     SpiTransaction::transaction_start(),
                     SpiTransaction::transfer_in_place(

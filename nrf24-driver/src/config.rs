@@ -42,6 +42,9 @@ impl RadioConfig {
         self.data_rate
     }
 
+    /// Whether transmitted packets request an ACK (currently always false).
+    ///
+    /// ENAA_P0 remains enabled for DPL; selective NO_ACK suppresses packet ACKs.
     pub const fn auto_ack(&self) -> bool {
         self.auto_ack
     }

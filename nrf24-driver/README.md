@@ -122,14 +122,101 @@ These experiments confirm SPI register read/write behavior consistent with the n
 
 ### Planned driver milestones
 
-- [ ] Implement register read/write operations
-- [ ] Add host-side unit tests using mock SPI
+- [x] Implement register read/write operations
+- [x] Add host-side unit tests using mock SPI
 - [ ] Integrate the driver with ESP32-C3 firmware
-- [ ] Configure RF operating parameters
-- [ ] Implement TX FIFO operations
+- [x] Configure RF operating parameters
+- [x] Implement TX FIFO operations
 - [ ] Transmit a test payload
-- [ ] Implement reception and IRQ handling
+- [x] Implement polling reception and RX status-flag handling
 - [ ] Validate communication between two physical nodes
+
+## First TX/RX test
+
+Use `RadioConfig::new(50, [0xE7; 5])` and `initialize(&config, &mut delay)`
+on **both** nodes, including the transmitter. This selects 1 Mbps, minimum TX
+power, five-byte addresses, one-byte CRC, and dynamic payloads on pipe 0.
+Initialization explicitly sets and verifies CRC and DPL configuration.
+`initialize_tx()` is a legacy diagnostic path, not the initializer for the
+current `transmit()` API.
+
+The public receive API is:
+
+```rust,ignore
+pub fn receive(&mut self, buffer: &mut [u8])
+    -> Result<Option<usize>, RxError<SPI::Error>>
+```
+
+After initialization, poll with a 32-byte buffer:
+
+```rust,ignore
+let mut buffer = [0u8; 32];
+if let Some(len) = radio.receive(&mut buffer)? {
+    // Print or decode precisely buffer[..len].
+}
+```
+
+Each call consumes at most one complete payload, with no allocation or wait for
+an RF packet. SPI transactions themselves are synchronous. Keep polling to drain
+queued packets while also servicing USB CDC; do not wait for an IRQ edge.
+
+- `Ok(None)`: no packet at the FIFO snapshot.
+- `BufferTooSmall { required, available }`: buffer untouched, packet retained;
+  retry with a larger buffer.
+- `NotReady`: initialization/state/mode rejection without hardware access.
+- `InvalidPayloadWidth(width)`: all queued RX packets discarded by recovery;
+  the driver remains Ready/RX. Zero is also rejected by this 1–32-byte API.
+- `Spi(error)`: the driver becomes Faulted with unknown mode, including errors
+  while clearing RX_DR or recovering the FIFO. Do not process buffer contents
+  after an error; a failed read may have partially modified them.
+
+RX errors have no GPIO error parameter because receive does not operate CE.
+Normal reception preserves CE and mode. Transmission preserves queued RX data.
+
+### Datasheet review
+
+The [Nordic specification](https://www.sparkfun.com/datasheets/Components/SMD/nRF24L01Pluss_Preliminary_Product_Specification_v1_0.pdf)
+(§7.3.4, table 20, §8.4 and register-map note c) defines `R_RX_PL_WID=0x60`,
+`R_RX_PAYLOAD=0x61`, and `FLUSH_RX=0xE2`. Widths over 32 require flushing.
+The RX FIFO holds three packets. RX_DR is an arrival notification, cleared by
+writing one; FIFO_STATUS determines whether unread packets remain. The driver
+writes only RX_DR, preserving TX_DS/MAX_RT, and checks the FIFO on every call.
+A racing arrival remains discoverable even if its notification was cleared.
+
+**No ACK packets in the initial test:** DPL requires ENAA_P0 enabled.
+As [Nordic explains](https://devzone.nordicsemi.com/f/nordic-q-a/99192/using-nrf24l01-with-pure-assembler-programing),
+use EN_DYN_ACK and `W_TX_PAYLOAD_NOACK=0xB0` to suppress acknowledgments while
+retaining dynamic framing. This driver now configures that combination.
+`RadioConfig::auto_ack()` remains false: transmitted packets request no ACK,
+although EN_AA is nonzero. Both peers must use this configuration.
+
+No `ACTIVATE 0x73` fallback is implemented: [Nordic confirms that genuine
+nRF24L01+ ignores ACTIVATE](https://devzone.nordicsemi.com/f/nordic-q-a/29601/nrf24l01-activate-command).
+FEATURE/DYNPD readback failure aborts initialization. The module's actual silicon
+identity and DPL behavior still require physical verification; no undocumented
+clone support is assumed.
+
+FLUSH_RX must not interrupt an ACK transmission. The test uses only NO_ACK
+frames from these peers. Receiving ACK-requesting traffic is outside this test
+configuration; supporting it needs review of recovery timing before enabling it.
+
+### Integration and hardware limitations
+
+The driver API is sufficient to send an encoded Le Rove frame of 1–32 bytes and
+receive its exact bytes. Firmware and protocol files were deliberately untouched.
+The existing firmware still needs these integration changes before a two-board run:
+
+- `train-esp32c3`: replace `initialize_tx()` with `initialize()`.
+- `station-rp2350`: replace the obsolete `TxConfig` import/use with `RadioConfig`,
+  initialize RX, and add receive polling plus USB CDC output.
+
+Use matching channel, address, data rate and payload configuration. Allow the
+module supply to stabilize and complete power-on reset before initialization;
+its internal 2 ms delay covers radio power-up, not board power sequencing.
+Use SPI Mode 0 (start at 1 MHz or below), a properly managed CSN, common ground,
+and stable 3.3 V power/decoupling suitable for the PA/LNA module. Wiring, module
+identity, supply integrity, and actual over-air reception have not been validated
+by these software tests. A successful no-ACK TX does not prove delivery.
 
 ## Design principles
 

@@ -8,13 +8,13 @@ use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::{Operation, SpiDevice};
 
 use crate::config::RadioConfig;
-use crate::error::{ConfigureError, InitError, PayloadError, RegisterError, TxError};
+use crate::error::{ConfigureError, InitError, PayloadError, RegisterError, RxError, TxError};
 use crate::registers::*;
 
 /// nRF24L01+ driver owning the SPI device and CE output pin.
 ///
 /// Starts in `RadioState::Unknown`. Call `initialize()`
-/// before attempting to transmit.
+/// before attempting to transmit or receive.
 ///
 /// SPI chip-select (CSN) is managed by the supplied `SpiDevice`.
 pub struct Nrf24<SPI, CE> {
@@ -63,7 +63,7 @@ pub enum RadioState {
     /// Verified initialization succeeded; the operating mode is known.
     Ready,
 
-    /// A critical error occurred; further transmissions are blocked.
+    /// A critical error occurred; further transmissions and receptions are blocked.
     Faulted,
 }
 
