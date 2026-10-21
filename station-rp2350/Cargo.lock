@@ -448,6 +448,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "le-rove-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -914,6 +918,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
  "heapless 0.9.3",
+ "le-rove-protocol",
  "nrf24-driver",
  "rp235x-hal",
  "usb-device",

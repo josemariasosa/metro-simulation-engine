@@ -1,50 +1,39 @@
 #![no_std]
 #![no_main]
 
-// We need to create our own panic handler because we are in a no_std environment.
+use core::fmt::Write;
 use core::panic::PanicInfo;
 
-use embedded_hal_bus::spi::ExclusiveDevice;
-use nrf24_driver::{Nrf24, TxConfig};
-// Alias our HAL.
-use rp235x_hal as hal;
-
-// Import traits for embedded abstractions.
-use embedded_hal::digital::{InputPin, OutputPin};
-
-// USB device and communications class device (CDC) support
-use usb_device::{class_prelude::*, prelude::*};
-use usbd_serial::{SerialPort, USB_CLASS_CDC};
-
-use core::fmt::Write;
-use heapless::String;
-
+use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::MODE_0;
+use embedded_hal_bus::spi::ExclusiveDevice;
+
 use hal::clocks::Clock;
 use hal::fugit::RateExtU32;
 use hal::gpio::FunctionSpi;
+use heapless::String;
 
-// Panic handler just loops indefinitely.
+use le_rove_protocol::codec::decode;
+use nrf24_driver::{Nrf24, RadioConfig};
+use rp235x_hal as hal;
+
+use usb_device::{bus::UsbBusAllocator, prelude::*};
+use usbd_serial::{SerialPort, USB_CLASS_CDC};
+
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-// Copy boot metadata to .start_block so boot ROM knows how to start the program.
 #[unsafe(link_section = ".start_block")]
 #[used]
 pub static IMAGE_DEF: hal::block::ImageDef = hal::block::ImageDef::secure_exe();
 
-// Set external crystal frequency for the system clock.
-const XOSC_CRYSTAL_FREQ: u32 = 12_000_000; // 12 MHz external crystal frequency
+const XOSC_CRYSTAL_FREQ: u32 = 12_000_000;
 
-// Main entry point for the program.
 #[hal::entry]
 fn main() -> ! {
-    // Get access of hardware peripherals.
     let mut pac = hal::pac::Peripherals::take().unwrap();
-
-    // Set up watchdog and clocks.
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
 
     let clocks = hal::clocks::init_clocks_and_plls(
@@ -59,15 +48,12 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    // Move ownership of TIMER0 peripheral to create Timer struct.
-    let timer: rp235x_hal::Timer<rp235x_hal::timer::CopyableTimer0> =
-        hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
+    let mut timer = hal::Timer::new_timer0(pac.TIMER0, &mut pac.RESETS, &clocks);
 
-    // ---- PIN SETUP ----
-    // Single-cycle I/O block (fast GPIO)
+    // ---- GPIO ----
+
     let sio = hal::Sio::new(pac.SIO);
 
-    // Split off ownership of peripherals struct, set pins to their initial states.
     let pins = hal::gpio::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
@@ -75,48 +61,30 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    // ---- NRF24L01 SPI SETUP ----
+    // ---- SPI0 ----
 
-    let spi_miso = pins.gpio16.into_function::<FunctionSpi>();
-    let spi_sck = pins.gpio18.into_function::<FunctionSpi>();
-    let spi_mosi = pins.gpio19.into_function::<FunctionSpi>();
+    let miso = pins.gpio16.into_function::<FunctionSpi>();
+    let sck = pins.gpio18.into_function::<FunctionSpi>();
+    let mosi = pins.gpio19.into_function::<FunctionSpi>();
 
-    let spi = hal::spi::Spi::<_, _, _, 8>::new(pac.SPI0, (spi_mosi, spi_miso, spi_sck)).init(
+    let spi = hal::spi::Spi::<_, _, _, 8>::new(pac.SPI0, (mosi, miso, sck)).init(
         &mut pac.RESETS,
         clocks.peripheral_clock.freq(),
         1.MHz(),
         MODE_0,
     );
 
-    // Chip Select Not: idle HIGH
     let mut csn = pins.gpio21.into_push_pull_output();
     csn.set_high().unwrap();
 
-    // Chip Enable: idle LOW
     let mut ce = pins.gpio20.into_push_pull_output();
     ce.set_low().unwrap();
 
-    let config = TxConfig::new(50, [0xE7; 5]).unwrap();
-
     let device = ExclusiveDevice::new_no_delay(spi, csn).unwrap();
-    let radio = Nrf24::new(device, ce);
+    let mut radio = Nrf24::new(device, ce);
 
-    // ---- LED SETUP ----
+    // ---- USB CDC ----
 
-    // Configure pin, get ownership of the LED pin.
-    let mut red_led = pins.gpio14.into_push_pull_output();
-
-    // ---- BUTTON SETUP ----
-    // Internal pull-up: released = HIGH, pressed = LOW.
-    let mut button = pins.gpio17.into_pull_up_input();
-
-    // ---- DHT11 SETUP ----
-    // Allow the sensor to stabilize after power-on.
-    let start = timer.get_counter();
-    while (timer.get_counter() - start).to_millis() < 2_000 {}
-
-    // ---- USB SETUP ----
-    // Initialize the USB driver
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USB,
         pac.USB_DPRAM,
@@ -125,55 +93,124 @@ fn main() -> ! {
         &mut pac.RESETS,
     ));
 
-    // Configure the USB as CDC
     let mut serial = SerialPort::new(&usb_bus);
 
-    // Create a USB device with fake VID and PID
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
         .strings(&[StringDescriptors::default()
-            .manufacturer("Fake Manufacturer")
-            .product("Serial Port")
-            .serial_number("12345678")])
+            .manufacturer("Le Rove")
+            .product("Metro Station")
+            .serial_number("00000001")])
         .unwrap()
-        .device_class(USB_CLASS_CDC) // from: https://www.usb.org/defined-class-codes
+        .device_class(USB_CLASS_CDC)
         .build();
 
-    let mut last_read = timer.get_counter();
-    let mut buffer: String<128> = String::new();
+    // ---- RADIO INITIALIZATION ----
+
+    let config = RadioConfig::new(50, [0xE7; 5]).unwrap();
+
+    let init_result = radio.initialize(&config, &mut timer);
+    let radio_ready = init_result.is_ok();
+
+    // ---- OUTPUT BUFFER ----
+
+    let mut output: String<512> = String::new();
     let mut tx_offset = 0usize;
-    let mut tx_pending = false;
-    let capture_start = timer.get_counter();
+    let mut tx_pending = true;
+
+    match init_result {
+        Ok(()) => {
+            let _ = write!(
+                output,
+                "Le Rove Station - RP2350\r\n\
+                 Radio initialized: RX ready\r\n\
+                 Waiting for packets...\r\n"
+            );
+        }
+        Err(error) => {
+            let _ = write!(output, "Radio initialization failed: {:?}\r\n", error);
+        }
+    }
+
+    let mut rx_buffer = [0u8; 32];
+
+    // ---- MAIN LOOP ----
+
     loop {
-        // Keep USB communication alive.
         usb_dev.poll(&mut [&mut serial]);
 
-        // Flush pending USB output without blocking.
+        // Non-blocking USB output.
         if tx_pending {
-            match serial.write(&buffer.as_bytes()[tx_offset..]) {
+            match serial.write(&output.as_bytes()[tx_offset..]) {
                 Ok(n) if n > 0 => {
                     tx_offset += n;
 
-                    if tx_offset == buffer.len() {
+                    if tx_offset >= output.len() {
                         tx_pending = false;
+                        tx_offset = 0;
+                        output.clear();
                     }
                 }
                 Ok(_) | Err(usb_device::UsbError::WouldBlock) => {}
                 Err(_) => {
                     tx_pending = false;
+                    tx_offset = 0;
+                    output.clear();
                 }
             }
         }
 
-        // Run a new DHT11 transaction every 2 seconds.
-        if (timer.get_counter() - last_read).to_millis() >= 2_000 {
-            last_read = timer.get_counter();
+        // Do not overwrite pending USB output.
+        if tx_pending || !radio_ready {
+            continue;
+        }
 
-            // Capture button state at the start of the sample.
-            let _ = if button.is_low().unwrap() {
-                "CHANGE"
-            } else {
-                "STABLE"
-            };
+        // ---- RADIO RECEIVE ----
+
+        match radio.receive(&mut rx_buffer) {
+            Ok(Some(length)) => {
+                let payload = &rx_buffer[..length];
+
+                match decode(payload) {
+                    Ok(message) => {
+                        let _ = write!(output, "RX ({} bytes): {:?}\r\n", length, message);
+                    }
+                    Err(error) => {
+                        let _ = write!(output, "Le Rove decode error: {:?}\r\n", error);
+                    }
+                }
+
+                tx_offset = 0;
+                tx_pending = !output.is_empty();
+            }
+
+            Ok(None) => {
+                // No radio packet available.
+            }
+
+            Err(error) => {
+                let _ = write!(output, "Radio RX error: {:?}\r\n", error);
+
+                tx_offset = 0;
+                tx_pending = !output.is_empty();
+
+                // Stop polling the faulted radio.
+                // Keep USB running for diagnostics.
+                loop {
+                    usb_dev.poll(&mut [&mut serial]);
+
+                    if tx_pending {
+                        match serial.write(&output.as_bytes()[tx_offset..]) {
+                            Ok(n) if n > 0 => {
+                                tx_offset += n;
+                                if tx_offset >= output.len() {
+                                    tx_pending = false;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
         }
     }
 }

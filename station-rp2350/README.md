@@ -1,0 +1,1 @@
+picotool uf2 convert target/thumbv8m.main-none-eabihf/release/steren-dht11 -t elf firmware.uf2

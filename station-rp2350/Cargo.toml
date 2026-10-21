@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 nrf24-driver = { path = "../nrf24-driver" }
+le-rove-protocol = { path = "../le-rove-protocol" }
 embedded-hal-bus = "0.3"
 rp235x-hal = { version = "0.4.0", features = ["rt", "critical-section-impl"] }
 embedded-hal = "1.0.0"
