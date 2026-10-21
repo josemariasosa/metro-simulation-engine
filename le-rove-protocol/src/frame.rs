@@ -1,3 +1,4 @@
+use crate::codec::DecodeError;
 use crate::identity::{CommandId, NodeId};
 use crate::message::{Event, Message, StopReason};
 
@@ -7,6 +8,14 @@ pub struct Frame {
     pub destination: NodeId,
     pub command_id: Option<CommandId>,
     pub message: Message,
+}
+
+impl TryFrom<&[u8]> for Frame {
+    type Error = DecodeError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        crate::codec::decode(value)
+    }
 }
 
 impl Frame {

@@ -1,3 +1,9 @@
+use crate::{
+    frame::Frame,
+    identity::{NodeId, TrainId},
+    message::{Event::Stopped, Location, Message::Event, StopReason},
+};
+
 pub const DEPART_ID: u32 = 0x01020304;
 pub const EMERGENCY_ID: u32 = 0x01020305;
 
@@ -48,3 +54,16 @@ pub const STOPPED_UNKNOWN: [u8; 18] = [
     0x01, 0x21, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x00,
     0x00, 0x00,
 ];
+
+pub fn stopped_unknown() -> Frame {
+    Frame {
+        source: NodeId::new(2).unwrap(),
+        destination: NodeId::new(1).unwrap(),
+        command_id: None,
+        message: Event(Stopped {
+            train_id: TrainId::new(3).unwrap(),
+            reason: StopReason::Unspecified,
+            location: Location::Unknown,
+        }),
+    }
+}

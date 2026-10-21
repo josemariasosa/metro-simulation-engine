@@ -1,25 +1,13 @@
-mod framing;
-mod server;
-
 use std::io;
+
+use bigwig_mq::server;
 
 use tokio::{net::TcpListener, sync::mpsc};
 
-// #[tokio::main]
-// async fn main() -> io::Result<()> {
-//     let listener = TcpListener::bind("127.0.0.1:5000").await?;
-
-//     println!("BigwigMQ listening on 127.0.0.1:5000");
-
-//     let address = listener.local_addr()?;
-
-//     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(32);
-//     crate::server::serve(listener, tx).await;
-// }
-
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:5000").await?;
+    let listener = TcpListener::bind("0.0.0.0:5000").await?;
+    // let listener = TcpListener::bind("127.0.0.1:5000").await?;
 
     println!("BigwigMQ listening on {}", listener.local_addr()?);
 

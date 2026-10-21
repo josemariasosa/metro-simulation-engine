@@ -7,4 +7,6 @@ edition = "2024"
 tokio = { version = "1.54.0", features = ["full"] }
 
 [dev-dependencies]
-le-rove-protocol = { path = "../le-rove-protocol" }
+le-rove-protocol = { path = "../le-rove-protocol", features = [
+    "test-fixtures",
+] }
